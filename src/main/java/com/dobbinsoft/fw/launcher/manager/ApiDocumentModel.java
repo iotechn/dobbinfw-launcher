@@ -2,6 +2,9 @@ package com.dobbinsoft.fw.launcher.manager;
 
 
 import com.dobbinsoft.fw.core.annotation.HttpParamType;
+import com.dobbinsoft.fw.core.enums.BaseEnums;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
 
 import java.util.List;
 
@@ -12,17 +15,11 @@ import java.util.List;
  * Date: 2018-09-13
  * Time: 上午9:35
  */
+@Data
 public class ApiDocumentModel {
     private List<Group> groups;
 
-    public List<Group> getGroups() {
-        return groups;
-    }
-
-    public void setGroups(List<Group> groups) {
-        this.groups = groups;
-    }
-
+    @Data
     public static class Group {
         /**
          * 组名
@@ -38,79 +35,19 @@ public class ApiDocumentModel {
          */
         private List<Method> methods;
 
-        public String getName() {
-            return name;
-        }
-
-        public void setName(String name) {
-            this.name = name;
-        }
-
-        public String getDescription() {
-            return description;
-        }
-
-        public void setDescription(String description) {
-            this.description = description;
-        }
-
-        public List<Method> getMethods() {
-            return methods;
-        }
-
-        public void setMethods(List<Method> methods) {
-            this.methods = methods;
-        }
     }
 
+    @Data
     public static class Method {
         private String name;
         private String description;
         private String retType;
         private List<Field> retObj;
         private List<Parameter> parameters;
-
-        public String getName() {
-            return name;
-        }
-
-        public void setName(String name) {
-            this.name = name;
-        }
-
-        public String getDescription() {
-            return description;
-        }
-
-        public void setDescription(String description) {
-            this.description = description;
-        }
-
-        public String getRetType() {
-            return retType;
-        }
-
-        public void setRetType(String retType) {
-            this.retType = retType;
-        }
-
-        public List<Field> getRetObj() {
-            return retObj;
-        }
-
-        public void setRetObj(List<Field> retObj) {
-            this.retObj = retObj;
-        }
-
-        public List<Parameter> getParameters() {
-            return parameters;
-        }
-
-        public void setParameters(List<Parameter> parameters) {
-            this.parameters = parameters;
-        }
+        private List<Entity> entityList;
     }
 
+    @Data
     public static class Parameter {
         private String name;
         private String description;
@@ -122,69 +59,27 @@ public class ApiDocumentModel {
          * 参数枚举
          */
         private HttpParamType type;
-
         private Boolean required;
 
-        public String getName() {
-            return name;
-        }
-
-        public void setName(String name) {
-            this.name = name;
-        }
-
-        public String getDescription() {
-            return description;
-        }
-
-        public void setDescription(String description) {
-            this.description = description;
-        }
-
-        public String getParamType() {
-            return paramType;
-        }
-
-        public void setParamType(String paramType) {
-            this.paramType = paramType;
-        }
-
-        public HttpParamType getType() {
-            return type;
-        }
-
-        public void setType(HttpParamType type) {
-            this.type = type;
-        }
-
-        public Boolean getRequired() {
-            return required;
-        }
-
-        public void setRequired(Boolean required) {
-            this.required = required;
-        }
     }
 
+    /**
+     * 请求实体
+     */
+    @Data
+    @EqualsAndHashCode(exclude = "fields")
+    public static class Entity {
+        private String type;
+        private String description;
+        private List<Field> fields;
+    }
+
+    @Data
     public static class Field {
         private String name;
         private String type;
-
-        public String getName() {
-            return name;
-        }
-
-        public void setName(String name) {
-            this.name = name;
-        }
-
-        public String getType() {
-            return type;
-        }
-
-        public void setType(String type) {
-            this.type = type;
-        }
+        private String description;
+        private Class<? extends BaseEnums> enums;
     }
 
 }

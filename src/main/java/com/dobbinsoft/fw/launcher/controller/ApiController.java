@@ -19,6 +19,7 @@ import com.dobbinsoft.fw.launcher.log.AccessLog;
 import com.dobbinsoft.fw.launcher.log.AccessLogger;
 import com.dobbinsoft.fw.launcher.manager.ApiManager;
 import com.dobbinsoft.fw.launcher.model.GatewayResponse;
+import com.dobbinsoft.fw.support.properties.FwSystemProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -26,17 +27,19 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationContext;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Controller;
+import org.springframework.util.ObjectUtils;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.ResponseBody;
-import com.dobbinsoft.fw.support.properties.FwSystemProperties;
 
 import javax.servlet.http.Cookie;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
+import java.lang.annotation.Annotation;
 import java.lang.reflect.*;
-import java.util.Date;
+import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
@@ -55,6 +58,7 @@ public class ApiController {
 
     @Autowired
     private ApplicationContext applicationContext;
+
     @Autowired
     private StringRedisTemplate userRedisTemplate;
 
@@ -180,9 +184,12 @@ public class ApiController {
                                 }
                             }
                             args[i] = realType;
+                        } else if (type == List.class) {
+                            args[i] = JSONObject.parseArray(paramArray[0], httpParam.arrayClass());
                         } else {
                             //Json解析
                             args[i] = JSONObject.parseObject(paramArray[0], type);
+                            this.checkParam(args[i]);
                         }
                     } else {
                         if (!StringUtils.isEmpty(httpParam.valueDef())) {
@@ -191,9 +198,10 @@ public class ApiController {
                             Constructor<?> constructor = type.getConstructor(String.class);
                             args[i] = constructor.newInstance(httpParam.valueDef());
                         } else {
-                            if (methodParam.getAnnotation(NotNull.class) != null) {
+                            NotNull notNull = methodParam.getAnnotation(NotNull.class);
+                            if (notNull != null) {
                                 logger.error("missing :" + httpParam.name());
-                                throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_PARAM_CHECK_FAILED);
+                                this.throwParamCheckServiceException(notNull);
                             }
                             args[i] = null;
                         }
@@ -287,7 +295,13 @@ public class ApiController {
         }
     }
 
-
+    /**
+     * 校验细粒度接口参数
+     * @param type
+     * @param methodParam
+     * @param target
+     * @throws ServiceException
+     */
     private void checkParam(Class<?> type, Parameter methodParam, String target) throws ServiceException {
         if (type == String.class) {
             TextFormat textFormat = methodParam.getAnnotation(TextFormat.class);
@@ -296,57 +310,57 @@ public class ApiController {
                 if (!StringUtils.isEmpty(regex)) {
                     //如果正则生效，则直接使用正则校验
                     if (!target.matches(regex)) {
-                        throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_PARAM_CHECK_FAILED);
+                        this.throwParamCheckServiceException(textFormat);
                     }
                 } else {
                     boolean notChinese = textFormat.notChinese();
                     if (notChinese) {
                         if (target.matches("[\\u4e00-\\u9fa5]+")) {
-                            throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_PARAM_CHECK_FAILED);
+                            this.throwParamCheckServiceException(textFormat);
                         }
                     }
 
                     String[] contains = textFormat.contains();
                     for (int j = 0; j < contains.length; j++) {
                         if (!target.contains(contains[j])) {
-                            throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_PARAM_CHECK_FAILED);
+                            this.throwParamCheckServiceException(textFormat);
                         }
                     }
 
                     String[] notContains = textFormat.notContains();
                     for (int j = 0; j < notContains.length; j++) {
                         if (target.contains(notContains[j])) {
-                            throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_PARAM_CHECK_FAILED);
+                            this.throwParamCheckServiceException(textFormat);
                         }
                     }
 
                     String startWith = textFormat.startWith();
                     if (!StringUtils.isEmpty(startWith)) {
                         if (!target.startsWith(startWith)) {
-                            throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_PARAM_CHECK_FAILED);
+                            this.throwParamCheckServiceException(textFormat);
                         }
                     }
 
                     String endsWith = textFormat.endsWith();
                     if (!StringUtils.isEmpty(target)) {
                         if (!target.endsWith(endsWith)) {
-                            throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_PARAM_CHECK_FAILED);
+                            this.throwParamCheckServiceException(textFormat);
                         }
                     }
                     int targetLength = target.length();
                     int length = textFormat.length();
                     if (length != -1) {
                         if (targetLength != length) {
-                            throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_PARAM_CHECK_FAILED);
+                            this.throwParamCheckServiceException(textFormat);
                         }
                     }
 
                     if (targetLength < textFormat.lengthMin()) {
-                        throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_PARAM_CHECK_FAILED);
+                        this.throwParamCheckServiceException(textFormat);
                     }
 
                     if (targetLength > textFormat.lengthMax()) {
-                        throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_PARAM_CHECK_FAILED);
+                        this.throwParamCheckServiceException(textFormat);
                     }
                 }
             }
@@ -355,7 +369,7 @@ public class ApiController {
             Integer integer = new Integer(target);
             if (range != null) {
                 if (integer > range.max() || integer < range.min()) {
-                    throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_PARAM_CHECK_FAILED);
+                    this.throwParamCheckServiceException(range);
                 }
             }
         } else if (type == Long.class) {
@@ -363,9 +377,119 @@ public class ApiController {
             if (range != null) {
                 Long integer = new Long(target);
                 if (integer > range.max() || integer < range.min()) {
-                    throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_PARAM_CHECK_FAILED);
+                    this.throwParamCheckServiceException(range);
+                }
+            }
+        } else if (type == Float.class) {
+            Range range = methodParam.getAnnotation(Range.class);
+            if (range != null) {
+                Float number = new Float(target);
+                if (number > range.max() || number < range.min()) {
+                    this.throwParamCheckServiceException(range);
+                }
+            }
+        } else if (type == Double.class) {
+            Range range = methodParam.getAnnotation(Range.class);
+            if (range != null) {
+                Double number = new Double(target);
+                if (number > range.max() || number < range.min()) {
+                    this.throwParamCheckServiceException(range);
                 }
             }
         }
     }
+
+    /**
+     * 校验粗粒度接口参数，递归校验
+     * @param object
+     * @throws ServiceException
+     */
+    private void checkParam(Object object) throws ServiceException {
+        try {
+            Class<?> objectClazz = object.getClass();
+            Field[] declaredFields = objectClazz.getDeclaredFields();
+            for (Field field : declaredFields) {
+                field.setAccessible(true);
+                // 1. 非空
+                NotNull notNull = field.getAnnotation(NotNull.class);
+                if (notNull != null && notNull.reqScope() && ObjectUtils.isEmpty(field.get(object))) {
+                    this.throwParamCheckServiceException(notNull);
+                }
+                // 2. 范围
+                Class<?> fieldClazz = field.getType();
+                if (Number.class.isAssignableFrom(fieldClazz)) {
+                    Range range = field.getAnnotation(Range.class);
+                    Object numberObject = field.get(object);
+                    if (numberObject != null) {
+                        if (fieldClazz == Integer.class) {
+                            if (range != null) {
+                                Integer number = new Integer(numberObject.toString());
+                                if (number > range.max() || number < range.min()) {
+                                    this.throwParamCheckServiceException(range);
+                                }
+                            }
+                        } else if (fieldClazz == Long.class) {
+                            if (range != null) {
+                                Long number = new Long(numberObject.toString());
+                                if (number > range.max() || number < range.min()) {
+                                    this.throwParamCheckServiceException(range);
+                                }
+                            }
+                        } else if (fieldClazz == Float.class) {
+                            if (range != null) {
+                                Float number = new Float(numberObject.toString());
+                                if (number > range.max() || number < range.min()) {
+                                    this.throwParamCheckServiceException(range);
+                                }
+                            }
+                        } else if (fieldClazz == Double.class) {
+                            if (range != null) {
+                                Double number = new Double(numberObject.toString());
+                                if (number > range.max() || number < range.min()) {
+                                    this.throwParamCheckServiceException(range);
+                                }
+                            }
+                        }
+                    }
+                }
+                // 3. 递归其他非基本类型
+                if (!Const.IGNORE_PARAM_LIST.contains(fieldClazz)) {
+                    if (Collection.class.isAssignableFrom(fieldClazz)) {
+                        // 3.1. Collection
+                        Collection collection = (Collection) field.get(object);
+                        if (collection != null) {
+                            for (Object obj : collection) {
+                                if (!Const.IGNORE_PARAM_LIST.contains(obj.getClass())) {
+                                    this.checkParam(obj);
+                                }
+                            }
+                        }
+                    } else {
+                        // 3.2. 其他对象
+                        Object obj = field.get(object);
+                        if (obj != null) {
+                            this.checkParam(obj);
+                        }
+                    }
+                }
+            }
+        } catch (IllegalAccessException e) {
+        }
+    }
+
+    private void throwParamCheckServiceException(Annotation annotation) throws ServiceException {
+        try {
+            Method method = annotation.getClass().getMethod("message");
+            Object res = method.invoke(annotation);
+            if (!ObjectUtils.isEmpty(res)) {
+                throw new LauncherServiceException((String) res, LauncherExceptionDefinition.LAUNCHER_PARAM_CHECK_FAILED.getCode());
+            } else {
+                throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_PARAM_CHECK_FAILED);
+            }
+        } catch (NoSuchMethodException e) {
+        } catch (IllegalAccessException e) {
+        } catch (InvocationTargetException e) {
+        }
+    }
+
 }

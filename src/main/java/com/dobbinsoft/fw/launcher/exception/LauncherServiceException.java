@@ -9,6 +9,10 @@ import com.dobbinsoft.fw.core.exception.ServiceExceptionDefinition;
  */
 public class LauncherServiceException extends ServiceException {
 
+    public LauncherServiceException(String message, int code) {
+        super(message, code);
+    }
+
     public LauncherServiceException(ServiceExceptionDefinition exceptionDefinition) {
         super(exceptionDefinition);
     }

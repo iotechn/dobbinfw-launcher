@@ -1,9 +1,14 @@
 package com.dobbinsoft.fw.launcher.manager;
 
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.dobbinsoft.fw.core.annotation.HttpMethod;
 import com.dobbinsoft.fw.core.annotation.HttpOpenApi;
 import com.dobbinsoft.fw.core.annotation.HttpParam;
+import com.dobbinsoft.fw.core.annotation.doc.ApiEntity;
+import com.dobbinsoft.fw.core.annotation.doc.ApiField;
 import com.dobbinsoft.fw.core.annotation.param.NotNull;
+import com.dobbinsoft.fw.core.enums.BaseEnums;
+import com.dobbinsoft.fw.core.enums.EmptyEnums;
 import com.dobbinsoft.fw.core.exception.ServiceException;
 import com.dobbinsoft.fw.launcher.exception.LauncherExceptionDefinition;
 import com.dobbinsoft.fw.launcher.exception.LauncherServiceException;
@@ -30,13 +35,13 @@ import java.util.*;
  * Time: 下午10:52
  */
 @Component
-public class ApiManager implements InitializingBean,ApplicationContextAware {
+public class ApiManager implements InitializingBean, ApplicationContextAware {
 
     private static final Logger logger = LoggerFactory.getLogger(ApiManager.class);
 
     private Map<String, Map<String, Method>> methodCacheMap = new HashMap<>();
 
-    private Map<String,String> groupDescCacheMap = new HashMap<>();
+    private Map<String, String> groupDescCacheMap = new HashMap<>();
 
     private ApplicationContext applicationContext;
 
@@ -80,7 +85,7 @@ public class ApiManager implements InitializingBean,ApplicationContextAware {
             if (tempMap == null) {
                 tempMap = new TreeMap<>();
                 methodCacheMap.put(group, tempMap);
-                groupDescCacheMap.put(group,httpOpenApiAnnotation.description());
+                groupDescCacheMap.put(group, httpOpenApiAnnotation.description());
             }
             for (Method method : methods) {
                 HttpMethod httpMethod = method.getAnnotation(HttpMethod.class);
@@ -92,7 +97,8 @@ public class ApiManager implements InitializingBean,ApplicationContextAware {
                     }
                     //迭代已有接口
                     boolean hasParent = false;
-                    permDTOLoop: for (PermissionPoint pointDTO : permDTOs) {
+                    permDTOLoop:
+                    for (PermissionPoint pointDTO : permDTOs) {
                         if (pointDTO.getLabel().equals(httpMethod.permissionParentName())) {
                             //若已经存在父分组，则将其追加在后面即可
                             hasParent = true;
@@ -111,7 +117,7 @@ public class ApiManager implements InitializingBean,ApplicationContextAware {
                         addChildPermissionPoint(parentDTO, httpMethod, httpOpenApiAnnotation, method);
                     }
                 }
-                if(httpMethod != null){
+                if (httpMethod != null) {
                     String key = method.getName();
                     Method methodQuery = tempMap.get(key);
                     if (methodQuery != null) {
@@ -119,7 +125,7 @@ public class ApiManager implements InitializingBean,ApplicationContextAware {
                     }
                     tempMap.put(key, method);
                     logger.info("[注册OpenApi] " + group + "." + method.getName());
-                }else{
+                } else {
                     logger.info("[注册OpenApi 失败] 没有注解." + method.getName());
                 }
 
@@ -184,34 +190,36 @@ public class ApiManager implements InitializingBean,ApplicationContextAware {
 
     /**
      * 获取文档模型的方法
+     *
      * @return
      */
     private ApiDocumentModel apiDocumentModelCache = null;
 
     public ApiDocumentModel generateDocumentModel() {
-        if(apiDocumentModelCache != null){
+        if (apiDocumentModelCache != null) {
             return apiDocumentModelCache;
         }
         Set<String> gpKeys = methodCacheMap.keySet();
         ApiDocumentModel apiDocumentModel = new ApiDocumentModel();
         List<ApiDocumentModel.Group> groups = new LinkedList<>();
         apiDocumentModel.setGroups(groups);
-        for(String gpKey : gpKeys){
+        for (String gpKey : gpKeys) {
             ApiDocumentModel.Group group = new ApiDocumentModel.Group();
             groups.add(group);
             group.setName(gpKey);
-            group.setDescription(groupDescCacheMap.getOrDefault(gpKey,""));
+            group.setDescription(groupDescCacheMap.getOrDefault(gpKey, ""));
             List<ApiDocumentModel.Method> docMethods = new LinkedList<>();
             group.setMethods(docMethods);
             Map<String, Method> methodMap = methodCacheMap.get(gpKey);
             Set<String> methodNameKeys = methodMap.keySet();
-            for(String methodNameKey : methodNameKeys){
+            for (String methodNameKey : methodNameKeys) {
                 Method method = methodMap.get(methodNameKey);
                 //获取参数
                 List<ApiDocumentModel.Parameter> docParameters = new LinkedList<>();
+                Set<ApiDocumentModel.Entity> docEntities = new HashSet<>();
                 Parameter[] parameters = method.getParameters();
-                if(parameters != null && parameters.length > 0) {
-                    for(Parameter parameter : parameters){
+                if (parameters != null && parameters.length > 0) {
+                    for (Parameter parameter : parameters) {
                         HttpParam httpParam = parameter.getAnnotation(HttpParam.class);
                         ApiDocumentModel.Parameter docParameter = new ApiDocumentModel.Parameter();
                         if (docParameter == null) {
@@ -223,62 +231,106 @@ public class ApiManager implements InitializingBean,ApplicationContextAware {
                         docParameter.setName(httpParam.name());
                         docParameter.setDescription(httpParam.description());
                         String typeName = parameter.getType().getTypeName();
-                        if(typeName.startsWith("[L")){
+                        if (typeName.startsWith("[L")) {
                             typeName = typeName.substring(2) + "[]";
                         }
                         docParameter.setParamType(typeName);
                         docParameter.setType(httpParam.type());
                         docParameter.setRequired(parameter.getAnnotation(NotNull.class) != null);
                         docParameters.add(docParameter);
+                        Set<ApiDocumentModel.Entity> entities = this.generateEntityModel(parameter.getType());
+                        docEntities.addAll(entities);
                     }
                 }
                 ApiDocumentModel.Method docMethod = new ApiDocumentModel.Method();
                 docMethod.setParameters(docParameters);
                 HttpMethod httpMethod = method.getAnnotation(HttpMethod.class);
-                if(httpMethod != null){
+                if (httpMethod != null) {
                     docMethod.setDescription(httpMethod.description());
                     docMethod.setName(method.getName());
                     Type returnType = method.getGenericReturnType();
                     String retType = returnType.toString();
-                    if(retType.startsWith("interface")){
-                        if(retType.startsWith("interface [L")){
+                    if (retType.startsWith("interface")) {
+                        if (retType.startsWith("interface [L")) {
                             retType = retType.substring(12);
-                        }else {
+                        } else {
                             retType = retType.substring(10);
                         }
-                    }else if(retType.startsWith("class")){
-                        if(retType.startsWith("class [L")) {
+                    } else if (retType.startsWith("class")) {
+                        if (retType.startsWith("class [L")) {
                             retType = retType.substring(8);
-                        }else {
+                        } else {
                             retType = retType.substring(6);
                         }
                     }
                     docMethod.setRetType(retType);
-                    if(retType.startsWith("com.iotechn")){
-                        //若返回值类型为复杂类型
-                        List<ApiDocumentModel.Field> fieldList = new ArrayList<>();
-                        Class returnClass = null;
-                        if(returnType instanceof Class){
+                    // 生成返回值文档
+                    Class returnClass = null;
+                    if (returnType instanceof Class) {
                             returnClass = (Class) returnType;
-                        }else if(returnType instanceof ParameterizedType){
+                        } else if (returnType instanceof ParameterizedType) {
                             ParameterizedType parameterizedType = (ParameterizedType) returnType;
-                            returnClass = (Class) parameterizedType.getActualTypeArguments()[0];
-                        }
-                        if(returnClass != null){
-                            Field[] declaredFields = returnClass.getDeclaredFields();
-                            for(Field field : declaredFields){
-                                ApiDocumentModel.Field docField = new ApiDocumentModel.Field();
-                                docField.setName(field.getName());
-                                docField.setType(field.getType().toString());
-                                fieldList.add(docField);
+                            Type[] types = parameterizedType.getActualTypeArguments();
+                            if (types.length > 1) {
+                                returnClass = (Class) (parameterizedType.getRawType());
+                            } else {
+                            Type type = types[0];
+                            if (type instanceof ParameterizedType) {
+                                returnClass = (Class) ((ParameterizedType) type).getRawType();
+                            } else {
+                                returnClass = (Class) type;
                             }
-                            docMethod.setRetObj(fieldList);
                         }
 
                     }
+                    ApiEntity apiEntity = (ApiEntity) returnClass.getAnnotation(ApiEntity.class);
+                    if (apiEntity != null) {
+                        //若返回值类型为复杂类型
+                        List<ApiDocumentModel.Field> fieldList = new ArrayList<>();
+                        if (returnClass != null) {
+                            Field[] declaredFields = returnClass.getDeclaredFields();
+                            for (Field field : declaredFields) {
+                                ApiDocumentModel.Field docField = new ApiDocumentModel.Field();
+                                ApiField apiField = field.getAnnotation(ApiField.class);
+                                if (apiField != null) {
+                                    if (apiField.enums() != EmptyEnums.class) {
+                                        Class<? extends BaseEnums> enums = apiField.enums();
+                                        docField.setDescription(apiField.description() + ":" + this.getEnumsMemo(enums));
+                                    } else {
+                                        docField.setDescription(apiField.description());
+                                    }
+                                    docField.setEnums(apiField.enums());
+                                } else {
+                                    docField.setDescription("暂无描述");
+                                }
+                                docField.setName(field.getName());
+
+                                Class type;
+                                if (Collection.class.isAssignableFrom(field.getType())
+                                        || IPage.class.isAssignableFrom(field.getType())) {
+                                    // List 派生
+                                    Type actualTypeArgument = ((ParameterizedType) field.getGenericType()).getActualTypeArguments()[0];
+                                    if (actualTypeArgument instanceof ParameterizedType) {
+                                        type = (Class) ((ParameterizedType) actualTypeArgument).getRawType();
+                                    } else {
+                                        type = (Class) actualTypeArgument;
+                                    }
+                                    docField.setType(field.getGenericType().toString().replace("<", "&lt;").replace(">", "&gt;"));
+                                } else {
+                                    type = field.getType();
+                                    docField.setType(field.getType().getTypeName());
+                                }
+                                fieldList.add(docField);
+                                // 生成实体文档
+                                docEntities.addAll(generateEntityModel(type));
+                            }
+                            docMethod.setRetObj(fieldList);
+                        }
+                    }
+                    docMethod.setEntityList(new ArrayList<>(docEntities));
                     docMethods.add(docMethod);
 
-                }else{
+                } else {
                     logger.info("生成文档失败:" + method.getName());
                 }
             }
@@ -290,22 +342,22 @@ public class ApiManager implements InitializingBean,ApplicationContextAware {
     public ApiDocumentModel.Group generateGroupModel(String group) {
         ApiDocumentModel apiDocumentModel = generateDocumentModel();
         List<ApiDocumentModel.Group> groups = apiDocumentModel.getGroups();
-        for (ApiDocumentModel.Group gp : groups){
-            if(gp.getName().equals(group)){
+        for (ApiDocumentModel.Group gp : groups) {
+            if (gp.getName().equals(group)) {
                 return gp;
             }
         }
         return null;
     }
 
-    public ApiDocumentModel.Method generateMethodModel(String gp, String mt){
+    public ApiDocumentModel.Method generateMethodModel(String gp, String mt) {
         ApiDocumentModel apiDocumentModel = generateDocumentModel();
         List<ApiDocumentModel.Group> groups = apiDocumentModel.getGroups();
-        for(ApiDocumentModel.Group group : groups){
-            if(group.getName().equals(gp)){
+        for (ApiDocumentModel.Group group : groups) {
+            if (group.getName().equals(gp)) {
                 List<ApiDocumentModel.Method> methods = group.getMethods();
-                for(ApiDocumentModel.Method method : methods){
-                    if(method.getName().equals(mt)){
+                for (ApiDocumentModel.Method method : methods) {
+                    if (method.getName().equals(mt)) {
                         return method;
                     }
                 }
@@ -314,10 +366,83 @@ public class ApiManager implements InitializingBean,ApplicationContextAware {
         return null;
     }
 
+    /**
+     * 生成实例模型
+     *
+     * @param clazz
+     * @return
+     */
+    public Set<ApiDocumentModel.Entity> generateEntityModel(Class clazz) {
+        HashSet<ApiDocumentModel.Entity> entities = new HashSet<>();
+        return generateEntityModel(clazz, entities);
+    }
 
-    public List<ApiDocumentModel.Method> methods(String gp){
-        for(ApiDocumentModel.Group group : generateDocumentModel().getGroups()){
-            if(group.getName().equals(gp)){
+    private Set<ApiDocumentModel.Entity> generateEntityModel(Class clazz, HashSet<ApiDocumentModel.Entity> entities) {
+        ApiEntity apiEntity = (ApiEntity) clazz.getAnnotation(ApiEntity.class);
+        if (apiEntity != null) {
+            ApiDocumentModel.Entity entity = new ApiDocumentModel.Entity();
+            entity.setDescription(apiEntity.description());
+            entity.setType(clazz.getTypeName());
+            if (!entities.contains(entity)) {
+                entities.add(entity);
+                Field[] declaredFields = clazz.getDeclaredFields();
+                List<ApiDocumentModel.Field> fieldList = new LinkedList<>();
+                for (Field field : declaredFields) {
+                    ApiDocumentModel.Field docField = new ApiDocumentModel.Field();
+                    ApiField apiField = field.getAnnotation(ApiField.class);
+                    if (apiField != null) {
+                        if (apiField.enums() != EmptyEnums.class) {
+                            Class<? extends BaseEnums> enums = apiField.enums();
+                            docField.setDescription(apiField.description() + ":" + this.getEnumsMemo(enums));
+                        } else {
+                            docField.setDescription(apiField.description());
+                        }
+                        docField.setEnums(apiField.enums());
+                    } else {
+                        docField.setDescription("暂无描述");
+                    }
+                    docField.setName(field.getName());
+                    Class type;
+                    if (Collection.class.isAssignableFrom(field.getType())
+                            || IPage.class.isAssignableFrom(field.getType())) {
+                        // List 派生
+                        Type actualTypeArgument = ((ParameterizedType) field.getGenericType()).getActualTypeArguments()[0];
+                        if (actualTypeArgument instanceof ParameterizedType) {
+                            type = (Class) ((ParameterizedType) actualTypeArgument).getRawType();
+                        } else {
+                            type = (Class) actualTypeArgument;
+                        }
+                        docField.setType(field.getGenericType().toString().replace("<", "&lt;").replace(">", "&gt;"));
+                    } else {
+                        type = field.getType();
+                        docField.setType(field.getType().getTypeName());
+                    }
+                    fieldList.add(docField);
+                    // 递归生成子文档 无限树结构问题？
+                    entities.addAll(generateEntityModel(type, entities));
+                }
+                entity.setFields(fieldList);
+            }
+        }
+        return entities;
+    }
+
+    private String getEnumsMemo(Class<? extends BaseEnums> clazz) {
+        BaseEnums[] enumConstants = clazz.getEnumConstants();
+        StringBuilder sb = new StringBuilder();
+        for (BaseEnums e : enumConstants) {
+            sb.append(e.getCode());
+            sb.append("-");
+            sb.append(e.getMsg());
+            sb.append(" ");
+        }
+        return sb.toString();
+    }
+
+
+    public List<ApiDocumentModel.Method> methods(String gp) {
+        for (ApiDocumentModel.Group group : generateDocumentModel().getGroups()) {
+            if (group.getName().equals(gp)) {
                 return group.getMethods();
             }
         }

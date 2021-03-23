@@ -10,6 +10,9 @@ import com.aliyun.oss.model.PolicyConditions;
 import com.aliyun.oss.model.PutObjectRequest;
 import com.dobbinsoft.fw.core.Const;
 import com.dobbinsoft.fw.core.util.GeneratorUtil;
+import com.dobbinsoft.fw.support.storage.StorageClient;
+import com.dobbinsoft.fw.support.storage.StorageRequest;
+import com.dobbinsoft.fw.support.storage.StorageResult;
 import lombok.extern.log4j.Log4j2;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,6 +21,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Controller;
 import org.springframework.util.FileCopyUtils;
+import org.springframework.util.ObjectUtils;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -41,8 +45,8 @@ public class FileUploadController {
     @Autowired
     private StringRedisTemplate userRedisTemplate;
 
-//    @Autowired
-//    private  storageClient;
+    @Autowired
+    private StorageClient storageClient;
 
 
     /**
@@ -54,22 +58,52 @@ public class FileUploadController {
      */
     @PostMapping("/admin")
     @ResponseBody
-    public Object create(@RequestParam("file") MultipartFile file, HttpServletRequest request) throws IOException {
+    public Object createAdmin(@RequestParam("file") MultipartFile file, HttpServletRequest request) throws IOException{
         String accessToken = request.getHeader(Const.ADMIN_ACCESS_TOKEN);
         String json = userRedisTemplate.opsForValue().get(Const.ADMIN_REDIS_PREFIX + accessToken);
-        if (!StringUtils.isEmpty(json)) {
-            ObjectMetadata objectMetadata = new ObjectMetadata();
-            objectMetadata.setContentLength(file.getSize());
-            objectMetadata.setContentType(file.getContentType());
-            String ext = FileNameUtil.getSuffix(file.getOriginalFilename());
-            String uuid = GeneratorUtil.genFileName();
-            Map<String, Object> data = new HashMap<>();
-//            data.put("url", unimallAliOSSProperties.getBaseUrl() + unimallAliOSSProperties.getDir() + uuid + "." + ext);
-            data.put("errno", 200);
-            data.put("errmsg", "成功");
-            return data;
+        if (!ObjectUtils.isEmpty(json)) {
+            return commonsUpload(file);
         }
         throw new RuntimeException("权限不足");
+    }
+
+    @PostMapping("/user")
+    @ResponseBody
+    public Object createUser(@RequestParam("file") MultipartFile file, HttpServletRequest request) throws IOException {
+        String accessToken = request.getHeader(Const.USER_ACCESS_TOKEN);
+        String json = userRedisTemplate.opsForValue().get(Const.USER_REDIS_PREFIX + accessToken);
+        if (!ObjectUtils.isEmpty(json)) {
+            return commonsUpload(file);
+        }
+        throw new RuntimeException("权限不足");
+    }
+
+    private Object commonsUpload(MultipartFile file) throws IOException {
+        InputStream inputStream = null;
+        Map<String, Object> data = new HashMap<>();
+        try {
+            String ext = FileNameUtil.getSuffix(file.getOriginalFilename());
+            String uuid = GeneratorUtil.genFileName();
+            StorageRequest storageRequest = new StorageRequest();
+            storageRequest.setContentType(file.getContentType());
+            storageRequest.setFilename(uuid + "." + ext);
+            storageRequest.setSize(file.getSize());
+            inputStream = file.getInputStream();
+            storageRequest.setIs(inputStream);
+            StorageResult result = storageClient.save(storageRequest);
+            if (result.isSuc()) {
+                data.put("url", result.getUrl());
+                data.put("errno", 200);
+                data.put("errmsg", "成功");
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("网络错误");
+        } finally {
+            if (inputStream != null) {
+                inputStream.close();
+            }
+        }
+        return data;
     }
 
     /**
@@ -84,7 +118,7 @@ public class FileUploadController {
     public Object local(@RequestParam("file") MultipartFile file, String fsf, HttpServletRequest request) throws IOException {
         String accessToken = request.getHeader(Const.ADMIN_ACCESS_TOKEN);
         String json = userRedisTemplate.opsForValue().get(Const.ADMIN_REDIS_PREFIX + accessToken);
-        if (!StringUtils.isEmpty(json)) {
+        if (!ObjectUtils.isEmpty(json)) {
             int i = fsf.lastIndexOf("/");
             if (i > 0) {
                 String substring = fsf.substring(0, i);
