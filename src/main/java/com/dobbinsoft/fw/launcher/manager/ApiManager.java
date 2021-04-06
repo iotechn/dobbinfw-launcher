@@ -89,35 +89,35 @@ public class ApiManager implements InitializingBean, ApplicationContextAware {
             }
             for (Method method : methods) {
                 HttpMethod httpMethod = method.getAnnotation(HttpMethod.class);
-                String permission = httpMethod.permission();
-                if (!StringUtils.isEmpty(permission)) {
-                    //若此接口需要权限
-                    if (StringUtils.isEmpty(httpMethod.permissionParentName()) || StringUtils.isEmpty(httpMethod.permissionName())) {
-                        throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_API_REGISTER_FAILED);
-                    }
-                    //迭代已有接口
-                    boolean hasParent = false;
-                    permDTOLoop:
-                    for (PermissionPoint pointDTO : permDTOs) {
-                        if (pointDTO.getLabel().equals(httpMethod.permissionParentName())) {
-                            //若已经存在父分组，则将其追加在后面即可
-                            hasParent = true;
-                            addChildPermissionPoint(pointDTO, httpMethod, httpOpenApiAnnotation, method);
-                            break permDTOLoop;
+                if (httpMethod != null) {
+                    String permission = httpMethod.permission();
+                    if (!StringUtils.isEmpty(permission)) {
+                        //若此接口需要权限
+                        if (StringUtils.isEmpty(httpMethod.permissionParentName()) || StringUtils.isEmpty(httpMethod.permissionName())) {
+                            throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_API_REGISTER_FAILED);
+                        }
+                        //迭代已有接口
+                        boolean hasParent = false;
+                        permDTOLoop:
+                        for (PermissionPoint pointDTO : permDTOs) {
+                            if (pointDTO.getLabel().equals(httpMethod.permissionParentName())) {
+                                //若已经存在父分组，则将其追加在后面即可
+                                hasParent = true;
+                                addChildPermissionPoint(pointDTO, httpMethod, httpOpenApiAnnotation, method);
+                                break permDTOLoop;
+                            }
+                        }
+                        if (!hasParent) {
+                            //若不存在父分组，则新建父分组
+                            PermissionPoint parentDTO = new PermissionPoint();
+                            parentDTO.setLabel(httpMethod.permissionParentName());
+                            parentDTO.setId(httpMethod.permissionParentName());
+                            parentDTO.setChildren(new LinkedList<>());
+                            permDTOs.add(parentDTO);
+                            //然后在parentDTO后面添加子类目，以及孙类目
+                            addChildPermissionPoint(parentDTO, httpMethod, httpOpenApiAnnotation, method);
                         }
                     }
-                    if (!hasParent) {
-                        //若不存在父分组，则新建父分组
-                        PermissionPoint parentDTO = new PermissionPoint();
-                        parentDTO.setLabel(httpMethod.permissionParentName());
-                        parentDTO.setId(httpMethod.permissionParentName());
-                        parentDTO.setChildren(new LinkedList<>());
-                        permDTOs.add(parentDTO);
-                        //然后在parentDTO后面添加子类目，以及孙类目
-                        addChildPermissionPoint(parentDTO, httpMethod, httpOpenApiAnnotation, method);
-                    }
-                }
-                if (httpMethod != null) {
                     String key = method.getName();
                     Method methodQuery = tempMap.get(key);
                     if (methodQuery != null) {

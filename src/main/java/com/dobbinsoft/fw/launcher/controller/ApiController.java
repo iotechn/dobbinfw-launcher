@@ -15,6 +15,7 @@ import com.dobbinsoft.fw.core.exception.ServiceException;
 import com.dobbinsoft.fw.core.util.SessionUtil;
 import com.dobbinsoft.fw.launcher.exception.LauncherExceptionDefinition;
 import com.dobbinsoft.fw.launcher.exception.LauncherServiceException;
+import com.dobbinsoft.fw.launcher.inter.BeforeHttpMethod;
 import com.dobbinsoft.fw.launcher.log.AccessLog;
 import com.dobbinsoft.fw.launcher.log.AccessLogger;
 import com.dobbinsoft.fw.launcher.manager.ApiManager;
@@ -58,6 +59,9 @@ public class ApiController {
 
     @Autowired
     private ApplicationContext applicationContext;
+
+    @Autowired(required = false)
+    private BeforeHttpMethod beforeHttpMethod;
 
     @Autowired
     private StringRedisTemplate userRedisTemplate;
@@ -125,6 +129,9 @@ public class ApiController {
             if (httpMethod == null) {
                 //只起标记作用防止调到封闭方法了
                 throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_API_NOT_EXISTS);
+            }
+            if (this.beforeHttpMethod != null) {
+                this.beforeHttpMethod.before(request, _gp, _mt, httpMethod);
             }
             String permission = httpMethod.permission();
             if (!StringUtils.isEmpty(permission)) {
