@@ -30,6 +30,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Controller;
 import org.springframework.util.ObjectUtils;
 import org.springframework.util.StringUtils;
+import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.ResponseBody;
@@ -53,6 +54,7 @@ import java.util.concurrent.TimeUnit;
  */
 @Controller
 @RequestMapping("/m.api")
+@CrossOrigin("*")
 public class ApiController {
 
     private static final Logger logger = LoggerFactory.getLogger(ApiController.class);
