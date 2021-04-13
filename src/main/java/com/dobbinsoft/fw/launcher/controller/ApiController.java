@@ -2,10 +2,7 @@ package com.dobbinsoft.fw.launcher.controller;
 
 import com.alibaba.fastjson.JSONObject;
 import com.dobbinsoft.fw.core.Const;
-import com.dobbinsoft.fw.core.annotation.HttpMethod;
-import com.dobbinsoft.fw.core.annotation.HttpParam;
-import com.dobbinsoft.fw.core.annotation.HttpParamType;
-import com.dobbinsoft.fw.core.annotation.ResultType;
+import com.dobbinsoft.fw.core.annotation.*;
 import com.dobbinsoft.fw.core.annotation.param.NotNull;
 import com.dobbinsoft.fw.core.annotation.param.Range;
 import com.dobbinsoft.fw.core.annotation.param.TextFormat;
@@ -21,6 +18,7 @@ import com.dobbinsoft.fw.launcher.log.AccessLogger;
 import com.dobbinsoft.fw.launcher.manager.ApiManager;
 import com.dobbinsoft.fw.launcher.model.GatewayResponse;
 import com.dobbinsoft.fw.support.properties.FwSystemProperties;
+import com.dobbinsoft.fw.support.rate.RateLimiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -73,6 +71,9 @@ public class ApiController {
 
     @Autowired(required = false)
     private AccessLogger accessLogger;
+
+    @Autowired
+    private RateLimiter rateLimiter;
 
     @Value("${com.iotechn.unimall.env}")
     private String ENV;
@@ -161,6 +162,15 @@ public class ApiController {
             Object serviceBean = applicationContext.getBean(method.getDeclaringClass());
             Parameter[] methodParameters = method.getParameters();
             Object[] args = new Object[methodParameters.length];
+            // 用户或管理员的ID，用于限流
+            Long personId = null;
+            String ip;
+            if (ENV.equals("1")) {
+                //若是开发环境
+                ip = "27.10.60.71";
+            } else {
+                ip = request.getHeader("X-Forwarded-For");
+            }
             for (int i = 0; i < methodParameters.length; i++) {
                 Parameter methodParam = methodParameters[i];
                 HttpParam httpParam = methodParam.getAnnotation(HttpParam.class);
@@ -223,6 +233,7 @@ public class ApiController {
                             IdentityOwner userDTO = (IdentityOwner)JSONObject.parseObject(userJson, sessionUtil.getUserClass());
                             sessionUtil.setUser(userDTO);
                             args[i] = userDTO.getId();
+                            personId = userDTO.getId();
                             userRedisTemplate.expire(Const.USER_REDIS_PREFIX + accessToken, unimallSystemProperties.getUserSessionPeriod(), TimeUnit.MINUTES);
                             continue;
                         }
@@ -238,6 +249,7 @@ public class ApiController {
                             PermissionOwner adminDTO = (PermissionOwner)JSONObject.parseObject(userJson, sessionUtil.getAdminClass());
                             sessionUtil.setAdmin(adminDTO);
                             args[i] = adminDTO.getId();
+                            personId = adminDTO.getId();
                             userRedisTemplate.expire(Const.ADMIN_REDIS_PREFIX + accessToken, unimallSystemProperties.getAdminSessionPeriod(), TimeUnit.MINUTES);
                             continue;
                         }
@@ -247,12 +259,7 @@ public class ApiController {
                     }
                 } else if (httpParam.type() == HttpParamType.IP) {
                     //这里根据实际情况来定。 若使用了负载均衡，Ip将会被代理服务器设置到某个Header里面
-                    if (ENV.equals("1")) {
-                        //若是开发环境
-                        args[i] = "27.10.60.71";
-                    } else {
-                        args[i] = request.getHeader("X-Forwarded-For");
-                    }
+                    args[i] = ip;
                 } else if (httpParam.type() == HttpParamType.HEADER) {
                     String header = request.getHeader(httpParam.name());
                     args[i] = header;
@@ -261,7 +268,10 @@ public class ApiController {
                     }
                 }
             }
-
+            // 流量限制
+            if (!this.rateLimiter.acquire(_gp + "." + _mt, httpMethod, personId, ip)) {
+                throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_SYSTEM_BUSY);
+            }
             Object invokeObj = method.invoke(serviceBean, args);
             ResultType resultType = httpMethod.type();
             if (!StringUtils.isEmpty(_type) && "raw".equals(_type)) {
