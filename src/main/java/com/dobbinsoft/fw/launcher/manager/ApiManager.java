@@ -267,21 +267,18 @@ public class ApiManager implements InitializingBean, ApplicationContextAware {
                     // 生成返回值文档
                     Class returnClass = null;
                     if (returnType instanceof Class) {
-                            returnClass = (Class) returnType;
-                        } else if (returnType instanceof ParameterizedType) {
-                            ParameterizedType parameterizedType = (ParameterizedType) returnType;
-                            Type[] types = parameterizedType.getActualTypeArguments();
-                            if (types.length > 1) {
-                                returnClass = (Class) (parameterizedType.getRawType());
-                            } else {
+                        returnClass = (Class) returnType;
+                    } else if (returnType instanceof ParameterizedType) {
+                        ParameterizedType parameterizedType = (ParameterizedType) returnType;
+                        Type[] types = parameterizedType.getActualTypeArguments();
+                        if (types.length > 1) {
+                            returnClass = (Class) (parameterizedType.getRawType());
+                        } else {
                             Type type = types[0];
                             if (type instanceof ParameterizedType) {
                                 returnClass = (Class) ((ParameterizedType) type).getRawType();
-                            } else {
-                                returnClass = (Class) type;
                             }
                         }
-
                     }
                     ApiEntity apiEntity = (ApiEntity) returnClass.getAnnotation(ApiEntity.class);
                     if (apiEntity != null) {
@@ -326,6 +323,14 @@ public class ApiManager implements InitializingBean, ApplicationContextAware {
                             }
                             docMethod.setRetObj(fieldList);
                         }
+                    }
+                    if (returnClass == null && returnType != null) {
+                        ApiDocumentModel.Field docField = new ApiDocumentModel.Field();
+                        docField.setDescription("未知类型");
+                        docField.setType(returnType.toString());
+                        docField.setName("unanme");
+                        docField.setEnums(EmptyEnums.class);
+                        docMethod.setRetObj(Arrays.asList(docField));
                     }
                     docMethod.setEntityList(new ArrayList<>(docEntities));
                     docMethods.add(docMethod);
@@ -438,7 +443,6 @@ public class ApiManager implements InitializingBean, ApplicationContextAware {
         }
         return sb.toString();
     }
-
 
     public List<ApiDocumentModel.Method> methods(String gp) {
         for (ApiDocumentModel.Group group : generateDocumentModel().getGroups()) {

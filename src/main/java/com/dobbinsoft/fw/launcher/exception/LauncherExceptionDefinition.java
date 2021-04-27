@@ -38,4 +38,10 @@ public class LauncherExceptionDefinition {
     public static final ServiceExceptionDefinition LAUNCHER_ADMIN_PERMISSION_DENY =
             new ServiceExceptionDefinition(10008, "管理员权限不足");
 
+    public static final ServiceExceptionDefinition LAUNCHER_OPEN_PLATFORM_CHECK_FAILED =
+            new ServiceExceptionDefinition(10009, "开放平台签名验证失败");
+
+    public static final ServiceExceptionDefinition LAUNCHER_OPEN_PLATFORM_TIMESTAMP_CHECKED =
+            new ServiceExceptionDefinition(10010, "时间戳与服务器时间出入过大");
+
 }

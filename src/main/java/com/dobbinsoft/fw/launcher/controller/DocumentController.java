@@ -21,7 +21,7 @@ import java.util.List;
  * Time: 上午9:31
  */
 @Controller
-@RequestMapping("/info")
+@RequestMapping("/doc")
 public class DocumentController implements InitializingBean {
 
     @Autowired
@@ -29,7 +29,7 @@ public class DocumentController implements InitializingBean {
 
     private List exceptionDefinitionList;
 
-    @RequestMapping("/")
+    @RequestMapping("/api")
     public ModelAndView index() {
         return group("user");
     }
@@ -49,8 +49,8 @@ public class DocumentController implements InitializingBean {
         ModelAndView modelAndView = new ModelAndView();
         modelAndView.setViewName("method");
         modelAndView.addObject("methods", apiManager.methods(gp));
-        modelAndView.addObject("model",apiManager.generateMethodModel(gp,mt));
-        modelAndView.addObject("gp",gp);
+        modelAndView.addObject("model", apiManager.generateMethodModel(gp, mt));
+        modelAndView.addObject("gp", gp);
         modelAndView.addObject("exceptionList", exceptionDefinitionList);
         return modelAndView;
     }

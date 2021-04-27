@@ -1,5 +1,6 @@
 package com.dobbinsoft.fw.launcher.controller;
 
+import cn.hutool.crypto.CryptoException;
 import com.alibaba.fastjson.JSONObject;
 import com.dobbinsoft.fw.core.Const;
 import com.dobbinsoft.fw.core.annotation.*;
@@ -17,8 +18,11 @@ import com.dobbinsoft.fw.launcher.log.AccessLog;
 import com.dobbinsoft.fw.launcher.log.AccessLogger;
 import com.dobbinsoft.fw.launcher.manager.ApiManager;
 import com.dobbinsoft.fw.launcher.model.GatewayResponse;
+import com.dobbinsoft.fw.support.component.open.OpenPlatform;
+import com.dobbinsoft.fw.support.component.open.model.OPData;
 import com.dobbinsoft.fw.support.properties.FwSystemProperties;
 import com.dobbinsoft.fw.support.rate.RateLimiter;
+import org.bouncycastle.jcajce.provider.util.BadBlockException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,10 +32,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Controller;
 import org.springframework.util.ObjectUtils;
 import org.springframework.util.StringUtils;
-import org.springframework.web.bind.annotation.CrossOrigin;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestMethod;
-import org.springframework.web.bind.annotation.ResponseBody;
+import org.springframework.web.bind.annotation.*;
 
 import javax.servlet.http.Cookie;
 import javax.servlet.http.HttpServletRequest;
@@ -41,6 +42,7 @@ import java.lang.reflect.*;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -72,6 +74,9 @@ public class ApiController {
     @Autowired(required = false)
     private AccessLogger accessLogger;
 
+    @Autowired(required = false)
+    private OpenPlatform openPlatform;
+
     @Autowired
     private RateLimiter rateLimiter;
 
@@ -83,12 +88,12 @@ public class ApiController {
 
     @RequestMapping(method = {RequestMethod.POST, RequestMethod.GET})
     @ResponseBody
-    public String invoke(HttpServletRequest req, HttpServletResponse res) {
+    public String invoke(HttpServletRequest req, HttpServletResponse res, @RequestBody(required = false) String requestBody) {
         long invokeTime = System.currentTimeMillis();
         try {
             logger.info("[HTTP] requestId={}; request={}", invokeTime, JSONObject.toJSONString(req.getParameterMap()));
-            Object obj = process(req, res, invokeTime);
-            if(Const.IGNORE_PARAM_LIST.contains(obj.getClass())){
+            Object obj = process(req, res, requestBody, invokeTime);
+            if (Const.IGNORE_PARAM_LIST.contains(obj.getClass())) {
                 return obj.toString();
             }
             String result = JSONObject.toJSONString(obj);
@@ -108,13 +113,33 @@ public class ApiController {
     }
 
 
-    private Object process(HttpServletRequest request, HttpServletResponse response, long invokeTime) throws ServiceException {
+    private Object process(HttpServletRequest request, HttpServletResponse response, String requestBody, long invokeTime) throws ServiceException {
         try {
+            String contentType = request.getContentType();
+            Map<String, String[]> parameterMap;
+            boolean ignoreAdminLogin = false;
+            if (contentType.indexOf("application/json") > -1) {
+                // json 报文
+                OPData opData = JSONObject.parseObject(requestBody, OPData.class);
+                try {
+                    parameterMap = openPlatform.decrypt(opData.getClientCode(), opData.getCiphertext());
+                } catch (CryptoException e) {
+                    throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_OPEN_PLATFORM_CHECK_FAILED);
+                }
+                Long optimestamp = Long.parseLong(parameterMap.get("optimestamp")[0]);
+                // TODO API 白名单校验
+                if (Math.abs(optimestamp - System.currentTimeMillis()) > 1000L * 60 * 3) {
+                    throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_OPEN_PLATFORM_TIMESTAMP_CHECKED);
+                }
+                ignoreAdminLogin = true;
+            } else {
+                parameterMap = request.getParameterMap();
+            }
             ApiManager apiManager = applicationContext.getBean(ApiManager.class);
-            Map<String, String[]> parameterMap = request.getParameterMap();
+
             String[] gps = parameterMap.get("_gp");
             String[] mts = parameterMap.get("_mt");
-            if(gps == null  || mts == null || gps.length == 0 || mts.length == 0){
+            if (gps == null || mts == null || gps.length == 0 || mts.length == 0) {
                 throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_API_NOT_EXISTS);
             }
             String _gp = gps[0];
@@ -146,17 +171,24 @@ public class ApiController {
                 }
                 PermissionOwner adminDTO = (PermissionOwner) JSONObject.parseObject(admin, sessionUtil.getAdminClass());
                 sessionUtil.setAdmin(adminDTO);
-                if (!sessionUtil.hasPerm(permission)) {
+                if (!sessionUtil.hasPerm(permission) && !ignoreAdminLogin) {
+                    /**
+                     * 权限不足有两种可能
+                     * 1. 可走开放平台
+                     * 2. 确实没有权限，也不走开放平台，则抛出异常
+                     */
                     throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_ADMIN_PERMISSION_DENY);
                 }
                 // 对有权限的方法进行日志记录
                 if (accessLogger != null) {
-                    AccessLog accessLog = new AccessLog();
-                    accessLog.setAdminId(adminDTO.getId());
-                    accessLog.setGroup(_gp);
-                    accessLog.setMethod(_mt);
-                    accessLog.setRequestId(invokeTime);
-                    accessLogger.save(accessLog);
+                    if (adminDTO != null) {
+                        AccessLog accessLog = new AccessLog();
+                        accessLog.setAdminId(adminDTO.getId());
+                        accessLog.setGroup(_gp);
+                        accessLog.setMethod(_mt);
+                        accessLog.setRequestId(invokeTime);
+                        accessLogger.save(accessLog);
+                    }
                 }
             }
             Object serviceBean = applicationContext.getBean(method.getDeclaringClass());
@@ -171,6 +203,8 @@ public class ApiController {
             } else {
                 ip = request.getHeader("X-Forwarded-For");
             }
+            // 若包含 ADMIN_ID || USER_ID 则此变量为true
+            boolean isPrivateApi = false;
             for (int i = 0; i < methodParameters.length; i++) {
                 Parameter methodParam = methodParameters[i];
                 HttpParam httpParam = methodParam.getAnnotation(HttpParam.class);
@@ -191,13 +225,13 @@ public class ApiController {
                         } else if (type.isArray()) {
                             //若是数组
                             Class<?> itemType = type.getComponentType();
-                            Object realType[] = (Object[]) Array.newInstance(itemType,paramArray.length);
-                            if(paramArray.length > 0){
-                                for(int j = 0; j < paramArray.length; j++) {
-                                    if(Const.IGNORE_PARAM_LIST.contains(itemType)){
+                            Object realType[] = (Object[]) Array.newInstance(itemType, paramArray.length);
+                            if (paramArray.length > 0) {
+                                for (int j = 0; j < paramArray.length; j++) {
+                                    if (Const.IGNORE_PARAM_LIST.contains(itemType)) {
                                         Constructor<?> constructor = itemType.getConstructor(String.class);
                                         realType[j] = constructor.newInstance(paramArray[j]);
-                                    }else {
+                                    } else {
                                         realType[j] = JSONObject.parseObject(paramArray[j], itemType);
                                     }
                                 }
@@ -230,7 +264,7 @@ public class ApiController {
                     if (!StringUtils.isEmpty(accessToken)) {
                         String userJson = userRedisTemplate.opsForValue().get(Const.USER_REDIS_PREFIX + accessToken);
                         if (!StringUtils.isEmpty(userJson)) {
-                            IdentityOwner userDTO = (IdentityOwner)JSONObject.parseObject(userJson, sessionUtil.getUserClass());
+                            IdentityOwner userDTO = (IdentityOwner) JSONObject.parseObject(userJson, sessionUtil.getUserClass());
                             sessionUtil.setUser(userDTO);
                             args[i] = userDTO.getId();
                             personId = userDTO.getId();
@@ -238,6 +272,7 @@ public class ApiController {
                             continue;
                         }
                     }
+                    isPrivateApi = true;
                     if (args[i] == null && methodParam.getAnnotation(NotNull.class) != null) {
                         throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_USER_NOT_LOGIN);
                     }
@@ -246,7 +281,7 @@ public class ApiController {
                     if (!StringUtils.isEmpty(accessToken)) {
                         String userJson = userRedisTemplate.opsForValue().get(Const.ADMIN_REDIS_PREFIX + accessToken);
                         if (!StringUtils.isEmpty(userJson)) {
-                            PermissionOwner adminDTO = (PermissionOwner)JSONObject.parseObject(userJson, sessionUtil.getAdminClass());
+                            PermissionOwner adminDTO = (PermissionOwner) JSONObject.parseObject(userJson, sessionUtil.getAdminClass());
                             sessionUtil.setAdmin(adminDTO);
                             args[i] = adminDTO.getId();
                             personId = adminDTO.getId();
@@ -254,8 +289,14 @@ public class ApiController {
                             continue;
                         }
                     }
-                    if (args[i] == null && methodParam.getAnnotation(NotNull.class) != null) {
-                        throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_ADMIN_NOT_LOGIN);
+                    isPrivateApi = true;
+                    if (args[i] == null && methodParam.getAnnotation(NotNull.class) != null && !ignoreAdminLogin) {
+                        /**
+                         * 管理员为空，有两种情况
+                         * 1. 可走开放平台
+                         * 2. 不可走开放平台，需要但需验签
+                         */
+                        throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_ADMIN_PERMISSION_DENY);
                     }
                 } else if (httpParam.type() == HttpParamType.IP) {
                     //这里根据实际情况来定。 若使用了负载均衡，Ip将会被代理服务器设置到某个Header里面
@@ -266,6 +307,9 @@ public class ApiController {
                     if (header == null && methodParam.getAnnotation(NotNull.class) != null) {
                         throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_PARAM_CHECK_FAILED);
                     }
+                }
+                if (isPrivateApi && httpMethod.openPlatform()) {
+                    throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_OPEN_PLATFORM_CHECK_FAILED);
                 }
             }
             // 流量限制
@@ -316,6 +360,7 @@ public class ApiController {
 
     /**
      * 校验细粒度接口参数
+     *
      * @param type
      * @param methodParam
      * @param target
@@ -420,6 +465,7 @@ public class ApiController {
 
     /**
      * 校验粗粒度接口参数，递归校验
+     *
      * @param object
      * @throws ServiceException
      */
