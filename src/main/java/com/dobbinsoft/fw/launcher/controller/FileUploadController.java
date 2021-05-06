@@ -90,6 +90,7 @@ public class FileUploadController {
             storageRequest.setSize(file.getSize());
             inputStream = file.getInputStream();
             storageRequest.setIs(inputStream);
+            storageRequest.setPath("commons");
             StorageResult result = storageClient.save(storageRequest);
             if (result.isSuc()) {
                 data.put("url", result.getUrl());

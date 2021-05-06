@@ -518,7 +518,7 @@ public class ApiController {
                     }
                 }
                 // 3. 递归其他非基本类型
-                if (!Const.IGNORE_PARAM_LIST.contains(fieldClazz)) {
+                if (!Modifier.isStatic(field.getModifiers()) && !Const.IGNORE_PARAM_LIST.contains(fieldClazz)) {
                     if (Collection.class.isAssignableFrom(fieldClazz)) {
                         // 3.1. Collection
                         Collection collection = (Collection) field.get(object);
