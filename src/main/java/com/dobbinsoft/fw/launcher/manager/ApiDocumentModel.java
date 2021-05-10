@@ -79,7 +79,9 @@ public class ApiDocumentModel {
         private String name;
         private String type;
         private String description;
-        private Class<? extends BaseEnums> enums;
+        private String map;
+        private String filter;
+        private BaseEnums[] enums;
     }
 
 }

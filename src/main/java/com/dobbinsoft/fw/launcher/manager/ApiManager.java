@@ -1,5 +1,6 @@
 package com.dobbinsoft.fw.launcher.manager;
 
+import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.dobbinsoft.fw.core.annotation.HttpMethod;
 import com.dobbinsoft.fw.core.annotation.HttpOpenApi;
@@ -277,6 +278,8 @@ public class ApiManager implements InitializingBean, ApplicationContextAware {
                             Type type = types[0];
                             if (type instanceof ParameterizedType) {
                                 returnClass = (Class) ((ParameterizedType) type).getRawType();
+                            } else {
+                                returnClass = (Class) type;
                             }
                         }
                     }
@@ -290,13 +293,16 @@ public class ApiManager implements InitializingBean, ApplicationContextAware {
                                 ApiDocumentModel.Field docField = new ApiDocumentModel.Field();
                                 ApiField apiField = field.getAnnotation(ApiField.class);
                                 if (apiField != null) {
-                                    if (apiField.enums() != EmptyEnums.class) {
+                                    BaseEnums[] enumConstants = apiField.enums().getEnumConstants();
+                                    if (apiField.enums() != EmptyEnums.class && enumConstants.length > 0) {
                                         Class<? extends BaseEnums> enums = apiField.enums();
                                         docField.setDescription(apiField.description() + ":" + this.getEnumsMemo(enums));
+                                        docField.setMap(enumConstants[0].getMap().replace("\n", "\\n").replace("'", "\\'"));
+                                        docField.setFilter(enumConstants[0].getFilter().replace("\n", "\\n").replace("'", "\\'"));
+                                        docField.setEnums(enumConstants);
                                     } else {
                                         docField.setDescription(apiField.description());
                                     }
-                                    docField.setEnums(apiField.enums());
                                 } else {
                                     docField.setDescription("暂无描述");
                                 }
@@ -329,7 +335,6 @@ public class ApiManager implements InitializingBean, ApplicationContextAware {
                         docField.setDescription("未知类型");
                         docField.setType(returnType.toString());
                         docField.setName("unanme");
-                        docField.setEnums(EmptyEnums.class);
                         docMethod.setRetObj(Arrays.asList(docField));
                     }
                     docMethod.setEntityList(new ArrayList<>(docEntities));
@@ -396,13 +401,16 @@ public class ApiManager implements InitializingBean, ApplicationContextAware {
                     ApiDocumentModel.Field docField = new ApiDocumentModel.Field();
                     ApiField apiField = field.getAnnotation(ApiField.class);
                     if (apiField != null) {
-                        if (apiField.enums() != EmptyEnums.class) {
+                        BaseEnums[] enumConstants = apiField.enums().getEnumConstants();
+                        if (apiField.enums() != EmptyEnums.class && enumConstants.length > 0) {
                             Class<? extends BaseEnums> enums = apiField.enums();
                             docField.setDescription(apiField.description() + ":" + this.getEnumsMemo(enums));
+                            docField.setMap(enumConstants[0].getMap().replace("\n", "\\n").replace("'", "\\'"));
+                            docField.setFilter(enumConstants[0].getFilter().replace("\n", "\\n").replace("'", "\\'"));
+                            docField.setEnums(enumConstants);
                         } else {
                             docField.setDescription(apiField.description());
                         }
-                        docField.setEnums(apiField.enums());
                     } else {
                         docField.setDescription("暂无描述");
                     }

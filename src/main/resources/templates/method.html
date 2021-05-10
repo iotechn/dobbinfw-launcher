@@ -154,7 +154,15 @@
                                         <tr>
                                             <td>${field.name}</td>
                                             <td><a href="#${field.type}">${field.type}</a></td>
-                                            <td>${field.description}</td>
+                                            <td>
+                                                <span>${field.description}</span>
+                                                <#if field.enums??>
+                                                    <a onclick="copyText('${field.map}')">复制MAP</a>
+                                                </#if>
+                                                <#if field.enums??>
+                                                    <a onclick="copyText('${field.filter}')">复制Filter</a>
+                                                </#if>
+                                            </td>
                                         </tr>
                                     </#list>
                                 </tbody>
@@ -182,7 +190,15 @@
                             <tr>
                                 <td>${field.name}</td>
                                 <td><a href="#${field.type}">${field.type}</a></td>
-                                <td>${field.description}</td>
+                                <td>
+                                    <span>${field.description}</span>
+                                    <#if field.enums??>
+                                        <a onclick="copyText('${field.map}')">复制MAP</a>
+                                    </#if>
+                                    <#if field.enums??>
+                                        <a onclick="copyText('${field.filter}')">复制Filter</a>
+                                    </#if>
+                                </td>
                             </tr>
                             </#list>
                             </tbody>
@@ -240,7 +256,10 @@
                                         </#if>
                                     </td>
                                     <td><input id="${param.name}" name="${param.name}" type="text"></td>
-                                    <td>${param.description}</td>
+                                    <td>
+                                        <span>${param.description}</span>
+                                    </td>
+
                                 </tr>
                             </#if>
 
@@ -286,6 +305,7 @@
             </section>
         </div>
     </div>
+<textarea id="copyborad" style="display: none"></textarea>
 </div>
 
 <div class="open-footer">
@@ -319,8 +339,16 @@
         });
     }
 </script>
-<script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/9.2.0/highlight.min.js"></script>
 <script>
+    function copyText(text) {
+        var copyborad = document.getElementById("copyborad");
+        copyborad.style.display = 'block'
+        copyborad.value = text; // 修改文本框的内容
+        copyborad.select(); // 选中文本
+        document.execCommand("copy"); // 执行浏览器复制命令
+        copyborad.style.display = 'none'
+        alert("复制成功");
+    }
     function getParamData(){
         //获取参数
         var requestData = {};
