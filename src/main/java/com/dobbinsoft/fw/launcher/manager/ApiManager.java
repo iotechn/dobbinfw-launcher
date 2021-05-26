@@ -1,5 +1,6 @@
 package com.dobbinsoft.fw.launcher.manager;
 
+import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.dobbinsoft.fw.core.annotation.HttpMethod;
 import com.dobbinsoft.fw.core.annotation.HttpOpenApi;
@@ -35,7 +36,7 @@ import java.util.*;
  * Time: 下午10:52
  */
 @Component
-public class ApiManager implements InitializingBean, ApplicationContextAware {
+public class ApiManager implements InitializingBean, ApplicationContextAware, IApiManager {
 
     private static final Logger logger = LoggerFactory.getLogger(ApiManager.class);
 
@@ -76,7 +77,7 @@ public class ApiManager implements InitializingBean, ApplicationContextAware {
         this.applicationContext = applicationContext;
     }
 
-    public void registerService(Class<?> targetClass) throws ServiceException {
+    private void registerService(Class<?> targetClass) throws ServiceException {
         HttpOpenApi httpOpenApiAnnotation = targetClass.getDeclaredAnnotation(HttpOpenApi.class);
         if (httpOpenApiAnnotation != null) {
             String group = httpOpenApiAnnotation.group();
@@ -180,12 +181,19 @@ public class ApiManager implements InitializingBean, ApplicationContextAware {
         childDTO.getChildren().add(pointDTO);
     }
 
-    public Method getMethod(String group, String name) {
+    @Override
+    public Method getMethod(String app, String group, String name) {
         Map<String, Method> tempMap = methodCacheMap.get(group);
         if (tempMap != null) {
             return tempMap.get(name);
         }
         return null;
+    }
+
+    @Override
+    public Object getServiceBean(Method method) {
+        Object serviceBean = applicationContext.getBean(method.getDeclaringClass());
+        return serviceBean;
     }
 
     /**
@@ -277,6 +285,8 @@ public class ApiManager implements InitializingBean, ApplicationContextAware {
                             Type type = types[0];
                             if (type instanceof ParameterizedType) {
                                 returnClass = (Class) ((ParameterizedType) type).getRawType();
+                            } else {
+                                returnClass = (Class) type;
                             }
                         }
                     }
@@ -290,13 +300,16 @@ public class ApiManager implements InitializingBean, ApplicationContextAware {
                                 ApiDocumentModel.Field docField = new ApiDocumentModel.Field();
                                 ApiField apiField = field.getAnnotation(ApiField.class);
                                 if (apiField != null) {
-                                    if (apiField.enums() != EmptyEnums.class) {
+                                    BaseEnums[] enumConstants = apiField.enums().getEnumConstants();
+                                    if (apiField.enums() != EmptyEnums.class && enumConstants.length > 0) {
                                         Class<? extends BaseEnums> enums = apiField.enums();
                                         docField.setDescription(apiField.description() + ":" + this.getEnumsMemo(enums));
+                                        docField.setMap(enumConstants[0].getMap().replace("\n", "\\n").replace("'", "\\'"));
+                                        docField.setFilter(enumConstants[0].getFilter().replace("\n", "\\n").replace("'", "\\'"));
+                                        docField.setEnums(enumConstants);
                                     } else {
                                         docField.setDescription(apiField.description());
                                     }
-                                    docField.setEnums(apiField.enums());
                                 } else {
                                     docField.setDescription("暂无描述");
                                 }
@@ -329,7 +342,6 @@ public class ApiManager implements InitializingBean, ApplicationContextAware {
                         docField.setDescription("未知类型");
                         docField.setType(returnType.toString());
                         docField.setName("unanme");
-                        docField.setEnums(EmptyEnums.class);
                         docMethod.setRetObj(Arrays.asList(docField));
                     }
                     docMethod.setEntityList(new ArrayList<>(docEntities));
@@ -396,13 +408,16 @@ public class ApiManager implements InitializingBean, ApplicationContextAware {
                     ApiDocumentModel.Field docField = new ApiDocumentModel.Field();
                     ApiField apiField = field.getAnnotation(ApiField.class);
                     if (apiField != null) {
-                        if (apiField.enums() != EmptyEnums.class) {
+                        BaseEnums[] enumConstants = apiField.enums().getEnumConstants();
+                        if (apiField.enums() != EmptyEnums.class && enumConstants.length > 0) {
                             Class<? extends BaseEnums> enums = apiField.enums();
                             docField.setDescription(apiField.description() + ":" + this.getEnumsMemo(enums));
+                            docField.setMap(enumConstants[0].getMap().replace("\n", "\\n").replace("'", "\\'"));
+                            docField.setFilter(enumConstants[0].getFilter().replace("\n", "\\n").replace("'", "\\'"));
+                            docField.setEnums(enumConstants);
                         } else {
                             docField.setDescription(apiField.description());
                         }
-                        docField.setEnums(apiField.enums());
                     } else {
                         docField.setDescription("暂无描述");
                     }
