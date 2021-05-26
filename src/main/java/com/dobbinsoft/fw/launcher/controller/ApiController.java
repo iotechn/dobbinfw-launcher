@@ -2,6 +2,7 @@ package com.dobbinsoft.fw.launcher.controller;
 
 import cn.hutool.crypto.CryptoException;
 import com.alibaba.fastjson.JSONObject;
+import com.alibaba.fastjson.serializer.SerializerFeature;
 import com.dobbinsoft.fw.core.Const;
 import com.dobbinsoft.fw.core.annotation.*;
 import com.dobbinsoft.fw.core.annotation.param.NotNull;
@@ -96,7 +97,7 @@ public class ApiController {
             if (Const.IGNORE_PARAM_LIST.contains(obj.getClass())) {
                 return obj.toString();
             }
-            String result = JSONObject.toJSONString(obj);
+            String result = JSONObject.toJSONString(obj, SerializerFeature.WriteMapNullValue);
             long during = System.currentTimeMillis() - invokeTime;
             logger.info("[HTTP] requestId={}; response={}; during={}ms", invokeTime, JSONObject.toJSONString(result), during);
             return result;
@@ -105,7 +106,7 @@ public class ApiController {
             gatewayResponse.setTimestamp(invokeTime);
             gatewayResponse.setErrno(e.getCode());
             gatewayResponse.setErrmsg(e.getMessage());
-            String result = JSONObject.toJSONString(gatewayResponse);
+            String result = JSONObject.toJSONString(gatewayResponse, SerializerFeature.WriteMapNullValue);
             long during = System.currentTimeMillis() - invokeTime;
             logger.info("[HTTP] requestId={}; response={}; during={}ms", invokeTime, JSONObject.toJSONString(result), during);
             return result;
