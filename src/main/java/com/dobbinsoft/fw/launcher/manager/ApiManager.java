@@ -36,7 +36,7 @@ import java.util.*;
  * Time: 下午10:52
  */
 @Component
-public class ApiManager implements InitializingBean, ApplicationContextAware {
+public class ApiManager implements InitializingBean, ApplicationContextAware, IApiManager {
 
     private static final Logger logger = LoggerFactory.getLogger(ApiManager.class);
 
@@ -77,7 +77,7 @@ public class ApiManager implements InitializingBean, ApplicationContextAware {
         this.applicationContext = applicationContext;
     }
 
-    public void registerService(Class<?> targetClass) throws ServiceException {
+    private void registerService(Class<?> targetClass) throws ServiceException {
         HttpOpenApi httpOpenApiAnnotation = targetClass.getDeclaredAnnotation(HttpOpenApi.class);
         if (httpOpenApiAnnotation != null) {
             String group = httpOpenApiAnnotation.group();
@@ -181,12 +181,19 @@ public class ApiManager implements InitializingBean, ApplicationContextAware {
         childDTO.getChildren().add(pointDTO);
     }
 
-    public Method getMethod(String group, String name) {
+    @Override
+    public Method getMethod(String app, String group, String name) {
         Map<String, Method> tempMap = methodCacheMap.get(group);
         if (tempMap != null) {
             return tempMap.get(name);
         }
         return null;
+    }
+
+    @Override
+    public Object getServiceBean(Method method) {
+        Object serviceBean = applicationContext.getBean(method.getDeclaringClass());
+        return serviceBean;
     }
 
     /**

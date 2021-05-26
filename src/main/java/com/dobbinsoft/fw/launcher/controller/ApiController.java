@@ -20,6 +20,7 @@ import com.dobbinsoft.fw.launcher.inter.BeforeHttpMethod;
 import com.dobbinsoft.fw.launcher.log.AccessLog;
 import com.dobbinsoft.fw.launcher.log.AccessLogger;
 import com.dobbinsoft.fw.launcher.manager.ApiManager;
+import com.dobbinsoft.fw.launcher.manager.IApiManager;
 import com.dobbinsoft.fw.launcher.model.GatewayResponse;
 import com.dobbinsoft.fw.support.component.open.OpenPlatform;
 import com.dobbinsoft.fw.support.component.open.model.OPData;
@@ -81,7 +82,7 @@ public class ApiController {
     @Autowired
     private RateLimiter rateLimiter;
 
-    @Value("${com.iotechn.unimall.env}")
+    @Value("${com.iotechn.unimall.env:1}")
     private String ENV;
 
     @Autowired
@@ -119,7 +120,7 @@ public class ApiController {
             String contentType = request.getContentType();
             Map<String, String[]> parameterMap;
             boolean ignoreAdminLogin = false;
-            if (contentType.indexOf("application/json") > -1) {
+            if (!StringUtils.isEmpty(contentType) && contentType.indexOf("application/json") > -1) {
                 // json 报文
                 OPData opData = JSONObject.parseObject(requestBody, OPData.class);
                 try {
@@ -136,21 +137,23 @@ public class ApiController {
             } else {
                 parameterMap = request.getParameterMap();
             }
-            ApiManager apiManager = applicationContext.getBean(ApiManager.class);
-
+            IApiManager apiManager = applicationContext.getBean(IApiManager.class);
             String[] gps = parameterMap.get("_gp");
             String[] mts = parameterMap.get("_mt");
+            String[] apps = parameterMap.get("_app");
             if (gps == null || mts == null || gps.length == 0 || mts.length == 0) {
                 throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_API_NOT_EXISTS);
             }
             String _gp = gps[0];
             String _mt = mts[0];
+            // 决定路由到某个系统，单体应用可忽略此字段。
+            String _app = (apps == null || apps.length == 0) ? "_app" : apps[0];
             String[] _types = parameterMap.get("_type");
             String _type = null;
             if (_types != null && _types.length > 0) {
                 _type = _types[0];
             }
-            Method method = apiManager.getMethod(_gp, _mt);
+            Method method = apiManager.getMethod(_app, _gp, _mt);
             if (method == null) {
                 throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_API_NOT_EXISTS);
             }
@@ -192,7 +195,7 @@ public class ApiController {
                     }
                 }
             }
-            Object serviceBean = applicationContext.getBean(method.getDeclaringClass());
+            Object serviceBean = apiManager.getServiceBean(method);
             Parameter[] methodParameters = method.getParameters();
             Object[] args = new Object[methodParameters.length];
             // 用户或管理员的ID，用于限流
