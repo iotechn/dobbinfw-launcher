@@ -14,7 +14,7 @@ import com.dobbinsoft.fw.core.annotation.param.TextFormat;
 import com.dobbinsoft.fw.core.entiy.inter.IdentityOwner;
 import com.dobbinsoft.fw.core.entiy.inter.PermissionOwner;
 import com.dobbinsoft.fw.core.exception.ServiceException;
-import com.dobbinsoft.fw.core.util.SessionUtil;
+import com.dobbinsoft.fw.core.util.ISessionUtil;
 import com.dobbinsoft.fw.launcher.exception.LauncherExceptionDefinition;
 import com.dobbinsoft.fw.launcher.exception.LauncherServiceException;
 import com.dobbinsoft.fw.launcher.inter.BeforeHttpMethod;
@@ -72,7 +72,7 @@ public class ApiController {
     private StringRedisTemplate userRedisTemplate;
 
     @Autowired
-    private SessionUtil sessionUtil;
+    private ISessionUtil sessionUtil;
 
     @Autowired(required = false)
     private AccessLogger accessLogger;
