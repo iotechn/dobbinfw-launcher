@@ -17,22 +17,24 @@ import com.dobbinsoft.fw.core.exception.ServiceException;
 import com.dobbinsoft.fw.core.util.ISessionUtil;
 import com.dobbinsoft.fw.launcher.exception.LauncherExceptionDefinition;
 import com.dobbinsoft.fw.launcher.exception.LauncherServiceException;
+import com.dobbinsoft.fw.launcher.exception.OtherExceptionTransfer;
+import com.dobbinsoft.fw.launcher.exception.OtherExceptionTransferHolder;
 import com.dobbinsoft.fw.launcher.inter.BeforeHttpMethod;
+import com.dobbinsoft.fw.launcher.invoker.CustomInvoker;
 import com.dobbinsoft.fw.launcher.log.AccessLog;
 import com.dobbinsoft.fw.launcher.log.AccessLogger;
-import com.dobbinsoft.fw.launcher.manager.ApiManager;
 import com.dobbinsoft.fw.launcher.manager.IApiManager;
 import com.dobbinsoft.fw.launcher.model.GatewayResponse;
+import com.dobbinsoft.fw.launcher.permission.IAdminAuthenticator;
+import com.dobbinsoft.fw.launcher.permission.IUserAuthenticator;
 import com.dobbinsoft.fw.support.component.open.OpenPlatform;
 import com.dobbinsoft.fw.support.component.open.model.OPData;
-import com.dobbinsoft.fw.support.properties.FwSystemProperties;
 import com.dobbinsoft.fw.support.rate.RateLimiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationContext;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Controller;
 import org.springframework.util.ObjectUtils;
 import org.springframework.util.StringUtils;
@@ -46,7 +48,6 @@ import java.lang.reflect.*;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 /**
  * Created with IntelliJ IDEA.
@@ -69,10 +70,13 @@ public class ApiController {
     private BeforeHttpMethod beforeHttpMethod;
 
     @Autowired
-    private StringRedisTemplate userRedisTemplate;
+    private ISessionUtil sessionUtil;
 
     @Autowired
-    private ISessionUtil sessionUtil;
+    private IUserAuthenticator userAuthenticator;
+
+    @Autowired
+    private IAdminAuthenticator adminAuthenticator;
 
     @Autowired(required = false)
     private AccessLogger accessLogger;
@@ -81,13 +85,16 @@ public class ApiController {
     private OpenPlatform openPlatform;
 
     @Autowired
+    private CustomInvoker customInvoker;
+
+    @Autowired
     private RateLimiter rateLimiter;
 
     @Value("${com.iotechn.unimall.env:1}")
     private String ENV;
 
     @Autowired
-    private FwSystemProperties unimallSystemProperties;
+    private OtherExceptionTransferHolder otherExceptionTransferHolder;
 
     @RequestMapping(method = {RequestMethod.POST, RequestMethod.GET})
     @ResponseBody
@@ -170,13 +177,9 @@ public class ApiController {
             if (!StringUtils.isEmpty(permission)) {
                 //若需要权限，则校验当前用户是否具有权限
                 String accessToken = request.getHeader(Const.ADMIN_ACCESS_TOKEN);
-                String admin = userRedisTemplate.opsForValue().get(Const.ADMIN_REDIS_PREFIX + accessToken);
-                if (StringUtils.isEmpty(admin)) {
-                    throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_ADMIN_NOT_LOGIN);
-                }
-                PermissionOwner adminDTO = (PermissionOwner) JSONObject.parseObject(admin, sessionUtil.getAdminClass());
+                PermissionOwner adminDTO = adminAuthenticator.getAdmin(accessToken);
                 sessionUtil.setAdmin(adminDTO);
-                if (!sessionUtil.hasPerm(permission) && !ignoreAdminLogin) {
+                if (adminDTO == null || !sessionUtil.hasPerm(permission) && !ignoreAdminLogin) {
                     /**
                      * 权限不足有两种可能
                      * 1. 可走开放平台
@@ -266,16 +269,10 @@ public class ApiController {
                     }
                 } else if (httpParam.type() == HttpParamType.USER_ID) {
                     String accessToken = request.getHeader(Const.USER_ACCESS_TOKEN);
-                    if (!StringUtils.isEmpty(accessToken)) {
-                        String userJson = userRedisTemplate.opsForValue().get(Const.USER_REDIS_PREFIX + accessToken);
-                        if (!StringUtils.isEmpty(userJson)) {
-                            IdentityOwner userDTO = (IdentityOwner) JSONObject.parseObject(userJson, sessionUtil.getUserClass());
-                            sessionUtil.setUser(userDTO);
-                            args[i] = userDTO.getId();
-                            personId = userDTO.getId();
-                            userRedisTemplate.expire(Const.USER_REDIS_PREFIX + accessToken, unimallSystemProperties.getUserSessionPeriod(), TimeUnit.MINUTES);
-                            continue;
-                        }
+                    IdentityOwner user = userAuthenticator.getUser(accessToken);
+                    if (user != null) {
+                        args[i] = user.getId();
+                        personId = user.getId();
                     }
                     isPrivateApi = true;
                     if (args[i] == null && methodParam.getAnnotation(NotNull.class) != null) {
@@ -283,16 +280,10 @@ public class ApiController {
                     }
                 } else if (httpParam.type() == HttpParamType.ADMIN_ID) {
                     String accessToken = request.getHeader(Const.ADMIN_ACCESS_TOKEN);
-                    if (!StringUtils.isEmpty(accessToken)) {
-                        String userJson = userRedisTemplate.opsForValue().get(Const.ADMIN_REDIS_PREFIX + accessToken);
-                        if (!StringUtils.isEmpty(userJson)) {
-                            PermissionOwner adminDTO = (PermissionOwner) JSONObject.parseObject(userJson, sessionUtil.getAdminClass());
-                            sessionUtil.setAdmin(adminDTO);
-                            args[i] = adminDTO.getId();
-                            personId = adminDTO.getId();
-                            userRedisTemplate.expire(Const.ADMIN_REDIS_PREFIX + accessToken, unimallSystemProperties.getAdminSessionPeriod(), TimeUnit.MINUTES);
-                            continue;
-                        }
+                    PermissionOwner adminDTO = adminAuthenticator.getAdmin(accessToken);
+                    if (adminDTO != null) {
+                        args[i] = adminDTO.getId();
+                        personId = adminDTO.getId();
                     }
                     isPrivateApi = true;
                     if (args[i] == null && methodParam.getAnnotation(NotNull.class) != null && !ignoreAdminLogin) {
@@ -321,7 +312,7 @@ public class ApiController {
             if (!this.rateLimiter.acquire(_gp + "." + _mt, httpMethod, personId, ip)) {
                 throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_SYSTEM_BUSY);
             }
-            Object invokeObj = method.invoke(serviceBean, args);
+            Object invokeObj = customInvoker.invoke(serviceBean, method, args);
             ResultType resultType = httpMethod.type();
             if (!StringUtils.isEmpty(_type) && "raw".equals(_type)) {
                 //如果是不用包装的直接返回
@@ -351,12 +342,23 @@ public class ApiController {
         } catch (ServiceException e) {
             throw e;
         } catch (Exception e) {
+            Throwable target = e;
+            logger.info(e.getClass().getClassLoader() + "");
             if (e instanceof InvocationTargetException) {
                 InvocationTargetException proxy = (InvocationTargetException) e;
                 Throwable targetException = proxy.getTargetException();
+                target = targetException;
+                logger.info(target.getClass().getClassLoader() + "");
                 if (targetException instanceof ServiceException) {
                     throw (ServiceException) targetException;
                 }
+            }
+            Class<? extends Throwable> clazz = target.getClass();
+            OtherExceptionTransfer transfer = otherExceptionTransferHolder.getByClass(clazz);
+            ServiceException afterTransServiceException = transfer.trans(e);
+            if (afterTransServiceException != null) {
+                logger.error("[网关] 系统未知异常 message=" + afterTransServiceException.getMessage(), e);
+                throw afterTransServiceException;
             }
             logger.error("[网关] 系统未知异常", e);
             throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_UNKNOWN_EXCEPTION);

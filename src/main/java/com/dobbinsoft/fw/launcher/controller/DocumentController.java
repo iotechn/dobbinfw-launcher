@@ -1,7 +1,7 @@
 package com.dobbinsoft.fw.launcher.controller;
 
 import com.dobbinsoft.fw.launcher.exception.LauncherExceptionDefinition;
-import com.dobbinsoft.fw.launcher.manager.ApiManager;
+import com.dobbinsoft.fw.launcher.manager.ClusterApiManager;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Controller;
@@ -25,7 +25,7 @@ import java.util.List;
 public class DocumentController implements InitializingBean {
 
     @Autowired
-    private ApiManager apiManager;
+    private ClusterApiManager clusterApiManager;
 
     private List exceptionDefinitionList;
 
@@ -43,8 +43,8 @@ public class DocumentController implements InitializingBean {
     public ModelAndView group(@PathVariable("gp") String group) {
         ModelAndView modelAndView = new ModelAndView();
         modelAndView.setViewName("document");
-        modelAndView.addObject("model", apiManager.generateGroupModel(group));
-        modelAndView.addObject("groupNames", apiManager.generateDocumentModel().getGroups());
+        modelAndView.addObject("model", clusterApiManager.generateGroupModel(group));
+        modelAndView.addObject("groupNames", clusterApiManager.generateDocumentModel().getGroups());
         return modelAndView;
     }
 
@@ -53,8 +53,8 @@ public class DocumentController implements InitializingBean {
     public ModelAndView api(@PathVariable("gp") String gp, @PathVariable("mt") String mt) {
         ModelAndView modelAndView = new ModelAndView();
         modelAndView.setViewName("method");
-        modelAndView.addObject("methods", apiManager.methods(gp));
-        modelAndView.addObject("model", apiManager.generateMethodModel(gp, mt));
+        modelAndView.addObject("methods", clusterApiManager.methods(gp));
+        modelAndView.addObject("model", clusterApiManager.generateMethodModel(gp, mt));
         modelAndView.addObject("gp", gp);
         modelAndView.addObject("exceptionList", exceptionDefinitionList);
         return modelAndView;
