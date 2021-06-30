@@ -2,27 +2,18 @@ package com.dobbinsoft.fw.launcher.controller;
 
 import cn.hutool.core.io.file.FileNameUtil;
 import com.alibaba.fastjson.JSONObject;
-import com.aliyun.oss.OSSClient;
-import com.aliyun.oss.common.utils.BinaryUtil;
-import com.aliyun.oss.model.MatchMode;
-import com.aliyun.oss.model.ObjectMetadata;
-import com.aliyun.oss.model.PolicyConditions;
-import com.aliyun.oss.model.PutObjectRequest;
 import com.dobbinsoft.fw.core.Const;
 import com.dobbinsoft.fw.core.util.GeneratorUtil;
 import com.dobbinsoft.fw.support.storage.StorageClient;
 import com.dobbinsoft.fw.support.storage.StorageRequest;
 import com.dobbinsoft.fw.support.storage.StorageResult;
-import lombok.extern.log4j.Log4j2;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Controller;
 import org.springframework.util.FileCopyUtils;
 import org.springframework.util.ObjectUtils;
-import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -30,14 +21,12 @@ import javax.servlet.ServletException;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.io.*;
-import java.sql.Date;
 import java.util.HashMap;
 import java.util.Map;
 
 /**
  * Created by rize on 2019/2/13.
  */
-@Log4j2
 @Controller
 @RequestMapping("/upload")
 public class FileUploadController {
@@ -47,6 +36,8 @@ public class FileUploadController {
 
     @Autowired
     private StorageClient storageClient;
+
+    private static final Logger logger = LoggerFactory.getLogger(FileUploadController.class);
 
 
     /**

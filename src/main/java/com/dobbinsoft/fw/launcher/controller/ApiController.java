@@ -14,17 +14,18 @@ import com.dobbinsoft.fw.core.annotation.param.TextFormat;
 import com.dobbinsoft.fw.core.entiy.inter.IdentityOwner;
 import com.dobbinsoft.fw.core.entiy.inter.PermissionOwner;
 import com.dobbinsoft.fw.core.exception.ServiceException;
+import com.dobbinsoft.fw.core.model.GatewayResponse;
 import com.dobbinsoft.fw.core.util.ISessionUtil;
 import com.dobbinsoft.fw.launcher.exception.LauncherExceptionDefinition;
 import com.dobbinsoft.fw.launcher.exception.LauncherServiceException;
 import com.dobbinsoft.fw.launcher.exception.OtherExceptionTransfer;
 import com.dobbinsoft.fw.launcher.exception.OtherExceptionTransferHolder;
+import com.dobbinsoft.fw.launcher.inter.AfterHttpMethod;
 import com.dobbinsoft.fw.launcher.inter.BeforeHttpMethod;
 import com.dobbinsoft.fw.launcher.invoker.CustomInvoker;
 import com.dobbinsoft.fw.launcher.log.AccessLog;
 import com.dobbinsoft.fw.launcher.log.AccessLogger;
 import com.dobbinsoft.fw.launcher.manager.IApiManager;
-import com.dobbinsoft.fw.launcher.model.GatewayResponse;
 import com.dobbinsoft.fw.launcher.permission.IAdminAuthenticator;
 import com.dobbinsoft.fw.launcher.permission.IUserAuthenticator;
 import com.dobbinsoft.fw.support.component.open.OpenPlatform;
@@ -69,6 +70,9 @@ public class ApiController {
     @Autowired(required = false)
     private BeforeHttpMethod beforeHttpMethod;
 
+    @Autowired(required = false)
+    private AfterHttpMethod afterHttpMethod;
+
     @Autowired
     private ISessionUtil sessionUtil;
 
@@ -106,20 +110,31 @@ public class ApiController {
             if (Const.IGNORE_PARAM_LIST.contains(obj.getClass())) {
                 return obj.toString();
             }
-            String result = JSONObject.toJSONString(obj, SerializerFeature.WriteMapNullValue);
-            long during = System.currentTimeMillis() - invokeTime;
-            logger.info("[HTTP] requestId={}; response={}; during={}ms", invokeTime, JSONObject.toJSONString(result), during);
-            return result;
+            return afterPost(res, invokeTime, obj);
         } catch (ServiceException e) {
             GatewayResponse gatewayResponse = new GatewayResponse();
             gatewayResponse.setTimestamp(invokeTime);
             gatewayResponse.setErrno(e.getCode());
             gatewayResponse.setErrmsg(e.getMessage());
-            String result = JSONObject.toJSONString(gatewayResponse, SerializerFeature.WriteMapNullValue);
-            long during = System.currentTimeMillis() - invokeTime;
-            logger.info("[HTTP] requestId={}; response={}; during={}ms", invokeTime, JSONObject.toJSONString(result), during);
-            return result;
+            return afterPost(res, invokeTime, gatewayResponse);
         }
+    }
+
+    /**
+     * 后置通知 抽取方法
+     * @param res 响应
+     * @param invokeTime 调用开始时间
+     * @param obj 调用结果
+     * @return
+     */
+    private String afterPost(HttpServletResponse res, long invokeTime, Object obj) {
+        String result = JSONObject.toJSONString(obj, SerializerFeature.WriteMapNullValue);
+        long during = System.currentTimeMillis() - invokeTime;
+        logger.info("[HTTP] requestId={}; response={}; during={}ms", invokeTime, JSONObject.toJSONString(result), during);
+        if (afterHttpMethod != null) {
+            afterHttpMethod.after(res, result);
+        }
+        return result;
     }
 
 
@@ -312,6 +327,8 @@ public class ApiController {
             if (!this.rateLimiter.acquire(_gp + "." + _mt, httpMethod, personId, ip)) {
                 throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_SYSTEM_BUSY);
             }
+            ClassLoader classLoader = serviceBean.getClass().getClassLoader();
+            Thread.currentThread().setContextClassLoader(classLoader);
             Object invokeObj = customInvoker.invoke(serviceBean, method, args);
             ResultType resultType = httpMethod.type();
             if (!StringUtils.isEmpty(_type) && "raw".equals(_type)) {

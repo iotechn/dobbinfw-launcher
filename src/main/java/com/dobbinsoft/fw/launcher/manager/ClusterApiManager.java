@@ -12,11 +12,13 @@ import com.dobbinsoft.fw.core.enums.EmptyEnums;
 import com.dobbinsoft.fw.core.exception.ServiceException;
 import com.dobbinsoft.fw.launcher.exception.LauncherExceptionDefinition;
 import com.dobbinsoft.fw.launcher.exception.LauncherServiceException;
+import com.dobbinsoft.fw.launcher.inter.AfterRegisterApiComplete;
 import com.dobbinsoft.fw.support.model.PermissionPoint;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.InitializingBean;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextAware;
 import org.springframework.stereotype.Component;
@@ -49,6 +51,9 @@ public class ClusterApiManager implements InitializingBean, ApplicationContextAw
 
     public static Set<String> allPermPoint = new HashSet<>();
 
+    @Autowired(required = false)
+    private AfterRegisterApiComplete afterRegisterApiComplete;
+
     @Override
     public void afterPropertiesSet() throws Exception {
         List<Class> classList = new LinkedList<>();
@@ -68,6 +73,9 @@ public class ClusterApiManager implements InitializingBean, ApplicationContextAw
         }
         for (Class clazz : classList) {
             this.registerService(clazz);
+        }
+        if (afterRegisterApiComplete != null) {
+            afterRegisterApiComplete.after(permDTOs);
         }
     }
 
