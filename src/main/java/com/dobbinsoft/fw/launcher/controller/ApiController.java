@@ -117,6 +117,10 @@ public class ApiController {
             gatewayResponse.setErrno(e.getCode());
             gatewayResponse.setErrmsg(e.getMessage());
             return afterPost(res, invokeTime, gatewayResponse);
+        } finally {
+            if (openPlatform != null) {
+                openPlatform.removeClientCode();
+            }
         }
     }
 
@@ -156,6 +160,7 @@ public class ApiController {
                 if (Math.abs(optimestamp - System.currentTimeMillis()) > 1000L * 60 * 3) {
                     throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_OPEN_PLATFORM_TIMESTAMP_CHECKED);
                 }
+                openPlatform.setClientCode(opData.getClientCode());
                 ignoreAdminLogin = true;
             } else {
                 parameterMap = request.getParameterMap();
@@ -365,7 +370,6 @@ public class ApiController {
                 InvocationTargetException proxy = (InvocationTargetException) e;
                 Throwable targetException = proxy.getTargetException();
                 target = targetException;
-                logger.info(target.getClass().getClassLoader() + "");
                 if (targetException instanceof ServiceException) {
                     throw (ServiceException) targetException;
                 }
