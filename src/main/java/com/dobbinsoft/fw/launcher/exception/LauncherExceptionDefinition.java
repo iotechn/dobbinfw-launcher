@@ -44,4 +44,7 @@ public class LauncherExceptionDefinition {
     public static final ServiceExceptionDefinition LAUNCHER_OPEN_PLATFORM_TIMESTAMP_CHECKED =
             new ServiceExceptionDefinition(10010, "时间戳与服务器时间出入过大");
 
+    public static final ServiceExceptionDefinition LAUNCHER_PRICE_FORMAT_EXCEPTION =
+            new ServiceExceptionDefinition(10011, "价格格式不正确！");
+
 }

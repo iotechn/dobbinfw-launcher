@@ -49,7 +49,9 @@ public class ClusterApiManager implements InitializingBean, ApplicationContextAw
 
     private static List<PermissionPoint> permDTOs = new LinkedList<>();
 
-    public static Set<String> allPermPoint = new HashSet<>();
+    private Set<Class> interfaceClassList = new TreeSet<>(Comparator.comparing(Class::getName));
+
+    private Map<String, String> permissionRouteMap = new HashMap<>();
 
     @Autowired(required = false)
     private AfterRegisterApiComplete afterRegisterApiComplete;
@@ -87,6 +89,7 @@ public class ClusterApiManager implements InitializingBean, ApplicationContextAw
     private void registerService(Class<?> targetClass) throws ServiceException {
         HttpOpenApi httpOpenApiAnnotation = targetClass.getDeclaredAnnotation(HttpOpenApi.class);
         if (httpOpenApiAnnotation != null) {
+            interfaceClassList.add(targetClass);
             String group = httpOpenApiAnnotation.group();
             Method[] methods = targetClass.getMethods();
             Map<String, Method> tempMap = methodCacheMap.get(group);
@@ -181,7 +184,7 @@ public class ClusterApiManager implements InitializingBean, ApplicationContextAw
         }
         //若无重复权限点
         PermissionPoint pointDTO = new PermissionPoint();
-        allPermPoint.add(httpMethod.permission());
+        permissionRouteMap.put(httpMethod.permission(), httpMethod.permissionParentName() + "-" + httpMethod.permissionName() + "-" + httpMethod.description());
         pointDTO.setId(httpMethod.permission());
         pointDTO.setLabel(httpMethod.description());
         pointDTO.setApi(httpOpenApi.group() + "." + method.getName());
@@ -201,6 +204,16 @@ public class ClusterApiManager implements InitializingBean, ApplicationContextAw
     public Object getServiceBean(Method method) {
         Object serviceBean = applicationContext.getBean(method.getDeclaringClass());
         return serviceBean;
+    }
+
+    @Override
+    public Set<Class> getRegisteredInterfaces() {
+        return this.interfaceClassList;
+    }
+
+    @Override
+    public String getPermissionRoute(String permission) {
+        return permissionRouteMap.get(permission);
     }
 
     /**

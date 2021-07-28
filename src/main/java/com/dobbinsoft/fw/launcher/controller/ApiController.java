@@ -132,7 +132,7 @@ public class ApiController {
      * @return
      */
     private String afterPost(HttpServletResponse res, long invokeTime, Object obj) {
-        String result = JSONObject.toJSONString(obj, SerializerFeature.WriteMapNullValue);
+        String result = JSONObject.toJSONString(obj, SerializerFeature.WriteMapNullValue, SerializerFeature.WriteDateUseDateFormat);
         long during = System.currentTimeMillis() - invokeTime;
         logger.info("[HTTP] requestId={}; response={}; during={}ms", invokeTime, JSONObject.toJSONString(result), during);
         if (afterHttpMethod != null) {
@@ -199,13 +199,21 @@ public class ApiController {
                 String accessToken = request.getHeader(Const.ADMIN_ACCESS_TOKEN);
                 PermissionOwner adminDTO = adminAuthenticator.getAdmin(accessToken);
                 sessionUtil.setAdmin(adminDTO);
-                if (adminDTO == null || !sessionUtil.hasPerm(permission) && !ignoreAdminLogin) {
+                if ((adminDTO == null || !sessionUtil.hasPerm(permission)) && !ignoreAdminLogin) {
                     /**
                      * 权限不足有两种可能
                      * 1. 可走开放平台
                      * 2. 确实没有权限，也不走开放平台，则抛出异常
                      */
-                    throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_ADMIN_PERMISSION_DENY);
+                    if (adminDTO == null) {
+                        throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_ADMIN_NOT_LOGIN);
+                    } else {
+                        String permissionRoute = apiManager.getPermissionRoute(permission);
+                        if (!StringUtils.isEmpty(permissionRoute)) {
+                            throw new LauncherServiceException("权限不足，请分配 " + permissionRoute, LauncherExceptionDefinition.LAUNCHER_ADMIN_PERMISSION_DENY.getCode());
+                        }
+                        throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_ADMIN_PERMISSION_DENY);
+                    }
                 }
                 // 对有权限的方法进行日志记录
                 if (accessLogger != null) {
@@ -278,6 +286,29 @@ public class ApiController {
                             Class<?> type = methodParam.getType();
                             Constructor<?> constructor = type.getConstructor(String.class);
                             args[i] = constructor.newInstance(httpParam.valueDef());
+                        } else {
+                            NotNull notNull = methodParam.getAnnotation(NotNull.class);
+                            if (notNull != null) {
+                                logger.error("missing :" + httpParam.name());
+                                this.throwParamCheckServiceException(notNull);
+                            }
+                            args[i] = null;
+                        }
+                    }
+                } else if (httpParam.type() == HttpParamType.MONEY) {
+                    // 若是钱，则
+                    String[] paramArray = parameterMap.get(httpParam.name());
+                    if (paramArray != null && paramArray.length > 0 && !StringUtils.isEmpty(paramArray[0])) {
+                        String priceRaw = paramArray[0];
+                        try {
+                            args[i] = Integer.parseInt((Float.parseFloat(priceRaw) * 100) + "");
+                        } catch (NumberFormatException e) {
+                            throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_PRICE_FORMAT_EXCEPTION);
+                        }
+                    } else {
+                        if (!StringUtils.isEmpty(httpParam.valueDef())) {
+                            //若有默认值
+                            args[i] = Integer.parseInt((Float.parseFloat(httpParam.valueDef()) * 100) + "");
                         } else {
                             NotNull notNull = methodParam.getAnnotation(NotNull.class);
                             if (notNull != null) {

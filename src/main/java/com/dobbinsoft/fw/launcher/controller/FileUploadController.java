@@ -49,7 +49,8 @@ public class FileUploadController {
      */
     @PostMapping("/admin")
     @ResponseBody
-    public Object createAdmin(@RequestParam("file") MultipartFile file, HttpServletRequest request) throws IOException{
+    public Object createAdmin(@RequestParam("file") MultipartFile file, HttpServletRequest request, HttpServletResponse response) throws IOException{
+        response.setHeader("Access-Control-Allow-Origin", "*");
         String accessToken = request.getHeader(Const.ADMIN_ACCESS_TOKEN);
         String json = userRedisTemplate.opsForValue().get(Const.ADMIN_REDIS_PREFIX + accessToken);
         if (!ObjectUtils.isEmpty(json)) {
