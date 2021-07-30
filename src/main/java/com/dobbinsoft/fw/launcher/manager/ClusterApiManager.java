@@ -47,7 +47,7 @@ public class ClusterApiManager implements InitializingBean, ApplicationContextAw
 
     private ApplicationContext applicationContext;
 
-    private static List<PermissionPoint> permDTOs = new LinkedList<>();
+    private List<PermissionPoint> permDTOs = new LinkedList<>();
 
     private Set<Class> interfaceClassList = new TreeSet<>(Comparator.comparing(Class::getName));
 
@@ -214,6 +214,11 @@ public class ClusterApiManager implements InitializingBean, ApplicationContextAw
     @Override
     public String getPermissionRoute(String permission) {
         return permissionRouteMap.get(permission);
+    }
+
+    @Override
+    public List<PermissionPoint> getPermissions() {
+        return this.permDTOs;
     }
 
     /**

@@ -1,7 +1,10 @@
 package com.dobbinsoft.fw.launcher.manager;
 
+import com.dobbinsoft.fw.support.model.PermissionPoint;
+
 import java.lang.reflect.Method;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -30,5 +33,7 @@ public interface IApiManager {
      * @return
      */
     public String getPermissionRoute(String permission);
+
+    public List<PermissionPoint> getPermissions();
 
 }
