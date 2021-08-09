@@ -355,7 +355,7 @@ public class ApiController {
                         throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_PARAM_CHECK_FAILED);
                     }
                 }
-                if (isPrivateApi && httpMethod.openPlatform()) {
+                if (ignoreAdminLogin && isPrivateApi && httpMethod.openPlatform()) {
                     throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_OPEN_PLATFORM_CHECK_FAILED);
                 }
             }

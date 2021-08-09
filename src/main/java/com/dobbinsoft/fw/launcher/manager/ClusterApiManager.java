@@ -1,6 +1,7 @@
 package com.dobbinsoft.fw.launcher.manager;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.dobbinsoft.fw.core.Const;
 import com.dobbinsoft.fw.core.annotation.HttpMethod;
 import com.dobbinsoft.fw.core.annotation.HttpOpenApi;
 import com.dobbinsoft.fw.core.annotation.HttpParam;
@@ -52,6 +53,10 @@ public class ClusterApiManager implements InitializingBean, ApplicationContextAw
     private Set<Class> interfaceClassList = new TreeSet<>(Comparator.comparing(Class::getName));
 
     private Map<String, String> permissionRouteMap = new HashMap<>();
+
+    private ApiDocumentModel apiDocumentModelCache = null;
+
+    private ApiDocumentModel openApiDocumentModelCache = null;
 
     @Autowired(required = false)
     private AfterRegisterApiComplete afterRegisterApiComplete;
@@ -222,12 +227,83 @@ public class ClusterApiManager implements InitializingBean, ApplicationContextAw
     }
 
     /**
+     * 获取开放平台文档模型
+     * @return
+     */
+    public ApiDocumentModel generateOpenDocumentModel() {
+        if (this.openApiDocumentModelCache != null) {
+            return this.openApiDocumentModelCache;
+        }
+        ApiDocumentModel apiDocumentModel = this.generateDocumentModel();
+        ApiDocumentModel openApiDocumentModel = new ApiDocumentModel();
+        List<ApiDocumentModel.Group> groups = apiDocumentModel.getGroups();
+        for (ApiDocumentModel.Group group : groups) {
+            List<ApiDocumentModel.Method> methods = group.getMethods();
+            for (ApiDocumentModel.Method method : methods) {
+                if (method.getOpenPlatform()) {
+                    // 若是开放平台，怼入 openApiDocumentModel
+                    List<ApiDocumentModel.Group> apiGroups = openApiDocumentModel.getGroups();
+                    if (apiGroups == null) {
+                        apiGroups = new ArrayList<>();
+                        openApiDocumentModel.setGroups(apiGroups);
+                    }
+                    ApiDocumentModel.Group apiGroup = null;
+                    for (ApiDocumentModel.Group item : apiGroups) {
+                        if (item.getName().equals(group.getName())) {
+                            apiGroup = item;
+                        }
+                    }
+                    if (apiGroup == null) {
+                        apiGroup = new ApiDocumentModel.Group();
+                        apiGroup.setName(group.getName());
+                        apiGroup.setDescription(group.getDescription());
+                        apiGroups.add(apiGroup);
+                    }
+                    List<ApiDocumentModel.Method> apiMethods = apiGroup.getMethods();
+                    if (apiMethods == null) {
+                        apiMethods = new ArrayList<>();
+                        apiGroup.setMethods(apiMethods);
+                    }
+                    apiMethods.add(method);
+                }
+            }
+        }
+        this.openApiDocumentModelCache = openApiDocumentModel;
+        return openApiDocumentModel;
+    }
+
+    public ApiDocumentModel.Group generateOpenGroupModel(String group) {
+        ApiDocumentModel apiDocumentModel = generateOpenDocumentModel();
+        List<ApiDocumentModel.Group> groups = apiDocumentModel.getGroups();
+        for (ApiDocumentModel.Group gp : groups) {
+            if (gp.getName().equals(group)) {
+                return gp;
+            }
+        }
+        return null;
+    }
+
+    public ApiDocumentModel.Method generateOpenMethodModel(String gp, String mt) {
+        ApiDocumentModel apiDocumentModel = generateOpenDocumentModel();
+        List<ApiDocumentModel.Group> groups = apiDocumentModel.getGroups();
+        for (ApiDocumentModel.Group group : groups) {
+            if (group.getName().equals(gp)) {
+                List<ApiDocumentModel.Method> methods = group.getMethods();
+                for (ApiDocumentModel.Method method : methods) {
+                    if (method.getName().equals(mt)) {
+                        return method;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
      * 获取文档模型的方法
      *
      * @return
      */
-    private ApiDocumentModel apiDocumentModelCache = null;
-
     public ApiDocumentModel generateDocumentModel() {
         if (apiDocumentModelCache != null) {
             return apiDocumentModelCache;
@@ -270,6 +346,7 @@ public class ClusterApiManager implements InitializingBean, ApplicationContextAw
                         docParameter.setParamType(typeName);
                         docParameter.setType(httpParam.type());
                         docParameter.setRequired(parameter.getAnnotation(NotNull.class) != null);
+                        docParameter.setJson(!Const.IGNORE_PARAM_LIST.contains(parameter.getType()));
                         docParameters.add(docParameter);
                         Set<ApiDocumentModel.Entity> entities = this.generateEntityModel(parameter.getType());
                         docEntities.addAll(entities);
@@ -279,6 +356,7 @@ public class ClusterApiManager implements InitializingBean, ApplicationContextAw
                 docMethod.setParameters(docParameters);
                 HttpMethod httpMethod = method.getAnnotation(HttpMethod.class);
                 if (httpMethod != null) {
+                    docMethod.setOpenPlatform(httpMethod.openPlatform());
                     docMethod.setDescription(httpMethod.description());
                     docMethod.setName(method.getName());
                     Type returnType = method.getGenericReturnType();

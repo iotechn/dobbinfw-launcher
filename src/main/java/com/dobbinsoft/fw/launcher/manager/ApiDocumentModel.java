@@ -18,6 +18,7 @@ import java.util.List;
 @Data
 public class ApiDocumentModel {
     private List<Group> groups;
+    private boolean openPlatform;
 
     @Data
     public static class Group {
@@ -42,6 +43,10 @@ public class ApiDocumentModel {
         private String name;
         private String description;
         private String retType;
+        /**
+         * 是否是开放平台接口
+         */
+        private Boolean openPlatform;
         private List<Field> retObj;
         private List<Parameter> parameters;
         private List<Entity> entityList;
@@ -60,6 +65,10 @@ public class ApiDocumentModel {
          */
         private HttpParamType type;
         private Boolean required;
+        /**
+         * 是否是JSON对象
+         */
+        private Boolean json;
 
     }
 
