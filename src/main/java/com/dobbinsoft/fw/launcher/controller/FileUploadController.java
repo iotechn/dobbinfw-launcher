@@ -5,6 +5,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.dobbinsoft.fw.core.Const;
 import com.dobbinsoft.fw.core.util.GeneratorUtil;
 import com.dobbinsoft.fw.support.storage.StorageClient;
+import com.dobbinsoft.fw.support.storage.StoragePrivateResult;
 import com.dobbinsoft.fw.support.storage.StorageRequest;
 import com.dobbinsoft.fw.support.storage.StorageResult;
 import org.slf4j.Logger;
@@ -55,6 +56,51 @@ public class FileUploadController {
         String json = userRedisTemplate.opsForValue().get(Const.ADMIN_REDIS_PREFIX + accessToken);
         if (!ObjectUtils.isEmpty(json)) {
             return commonsUpload(file);
+        }
+        throw new RuntimeException("权限不足");
+    }
+
+    /**
+     * 后台通过服务器代理间接上传 私密文件（非公开URL）
+     * @param file
+     * @param request
+     * @param response
+     * @return
+     * @throws IOException
+     */
+    @PostMapping("/admin/private")
+    @ResponseBody
+    public Object createAdminPrivate(@RequestParam("file") MultipartFile file, HttpServletRequest request, HttpServletResponse response) throws IOException{
+        response.setHeader("Access-Control-Allow-Origin", "*");
+        String accessToken = request.getHeader(Const.ADMIN_ACCESS_TOKEN);
+        String json = userRedisTemplate.opsForValue().get(Const.ADMIN_REDIS_PREFIX + accessToken);
+        if (!ObjectUtils.isEmpty(json)) {
+            InputStream inputStream = null;
+            Map<String, Object> data = new HashMap<>();
+            try {
+                String ext = FileNameUtil.getSuffix(file.getOriginalFilename());
+                String uuid = GeneratorUtil.genFileName();
+                StorageRequest storageRequest = new StorageRequest();
+                storageRequest.setContentType(file.getContentType());
+                storageRequest.setFilename(uuid + "." + ext);
+                storageRequest.setSize(file.getSize());
+                inputStream = file.getInputStream();
+                storageRequest.setIs(inputStream);
+                storageRequest.setPath("private");
+                StoragePrivateResult result = storageClient.savePrivate(storageRequest);
+                if (result.isSuc()) {
+                    data.put("key", result.getKey());
+                    data.put("url", result.getUrl());
+                    data.put("errno", 200);
+                    data.put("errmsg", "成功");
+                }
+            } catch (IOException e) {
+                throw new RuntimeException("网络错误");
+            } finally {
+                if (inputStream != null) {
+                    inputStream.close();
+                }
+            }
         }
         throw new RuntimeException("权限不足");
     }
