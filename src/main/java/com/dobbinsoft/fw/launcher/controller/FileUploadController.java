@@ -3,7 +3,9 @@ package com.dobbinsoft.fw.launcher.controller;
 import cn.hutool.core.io.file.FileNameUtil;
 import com.alibaba.fastjson.JSONObject;
 import com.dobbinsoft.fw.core.Const;
+import com.dobbinsoft.fw.core.entiy.inter.PermissionOwner;
 import com.dobbinsoft.fw.core.util.GeneratorUtil;
+import com.dobbinsoft.fw.launcher.permission.IAdminAuthenticator;
 import com.dobbinsoft.fw.support.storage.StorageClient;
 import com.dobbinsoft.fw.support.storage.StoragePrivateResult;
 import com.dobbinsoft.fw.support.storage.StorageRequest;
@@ -38,6 +40,9 @@ public class FileUploadController {
     @Autowired
     private StorageClient storageClient;
 
+    @Autowired
+    private IAdminAuthenticator adminAuthenticator;
+
     private static final Logger logger = LoggerFactory.getLogger(FileUploadController.class);
 
 
@@ -53,8 +58,8 @@ public class FileUploadController {
     public Object createAdmin(@RequestParam("file") MultipartFile file, HttpServletRequest request, HttpServletResponse response) throws IOException{
         response.setHeader("Access-Control-Allow-Origin", "*");
         String accessToken = request.getHeader(Const.ADMIN_ACCESS_TOKEN);
-        String json = userRedisTemplate.opsForValue().get(Const.ADMIN_REDIS_PREFIX + accessToken);
-        if (!ObjectUtils.isEmpty(json)) {
+        PermissionOwner admin = adminAuthenticator.getAdmin(accessToken);
+        if (admin != null) {
             return commonsUpload(file);
         }
         throw new RuntimeException("权限不足");
@@ -73,8 +78,8 @@ public class FileUploadController {
     public Object createAdminPrivate(@RequestParam("file") MultipartFile file, HttpServletRequest request, HttpServletResponse response) throws IOException{
         response.setHeader("Access-Control-Allow-Origin", "*");
         String accessToken = request.getHeader(Const.ADMIN_ACCESS_TOKEN);
-        String json = userRedisTemplate.opsForValue().get(Const.ADMIN_REDIS_PREFIX + accessToken);
-        if (!ObjectUtils.isEmpty(json)) {
+        PermissionOwner admin = adminAuthenticator.getAdmin(accessToken);
+        if (admin != null) {
             InputStream inputStream = null;
             Map<String, Object> data = new HashMap<>();
             try {
@@ -93,6 +98,7 @@ public class FileUploadController {
                     data.put("url", result.getUrl());
                     data.put("errno", 200);
                     data.put("errmsg", "成功");
+                    return data;
                 }
             } catch (IOException e) {
                 throw new RuntimeException("网络错误");

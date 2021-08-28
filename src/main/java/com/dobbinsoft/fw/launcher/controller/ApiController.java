@@ -22,6 +22,7 @@ import com.dobbinsoft.fw.launcher.exception.OtherExceptionTransfer;
 import com.dobbinsoft.fw.launcher.exception.OtherExceptionTransferHolder;
 import com.dobbinsoft.fw.launcher.inter.AfterHttpMethod;
 import com.dobbinsoft.fw.launcher.inter.BeforeHttpMethod;
+import com.dobbinsoft.fw.launcher.inter.BeforeProcess;
 import com.dobbinsoft.fw.launcher.invoker.CustomInvoker;
 import com.dobbinsoft.fw.launcher.log.AccessLog;
 import com.dobbinsoft.fw.launcher.log.AccessLogger;
@@ -66,6 +67,9 @@ public class ApiController {
 
     @Autowired
     private ApplicationContext applicationContext;
+
+    @Autowired(required = false)
+    private BeforeProcess beforeProcess;
 
     @Autowired(required = false)
     private BeforeHttpMethod beforeHttpMethod;
@@ -144,6 +148,9 @@ public class ApiController {
 
     private Object process(HttpServletRequest request, HttpServletResponse response, String requestBody, long invokeTime) throws ServiceException {
         try {
+            if (this.beforeProcess != null) {
+                this.beforeProcess.before(request);
+            }
             String contentType = request.getContentType();
             Map<String, String[]> parameterMap;
             boolean ignoreAdminLogin = false;
