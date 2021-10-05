@@ -245,6 +245,9 @@ public class ApiController {
                 ip = "27.10.60.71";
             } else {
                 ip = request.getHeader("X-Forwarded-For");
+                if (StringUtils.isEmpty(ip)) {
+                    ip = request.getHeader("X-Real-IP");
+                }
             }
             // 若包含 ADMIN_ID || USER_ID 则此变量为true
             boolean isPrivateApi = false;
