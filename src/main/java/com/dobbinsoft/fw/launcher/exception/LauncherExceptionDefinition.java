@@ -47,4 +47,7 @@ public class LauncherExceptionDefinition {
     public static final ServiceExceptionDefinition LAUNCHER_PRICE_FORMAT_EXCEPTION =
             new ServiceExceptionDefinition(10011, "价格格式不正确！");
 
+    public static final ServiceExceptionDefinition LAUNCHER_OPEN_CLIENT_CODE_CANNOT_BE_NULL =
+            new ServiceExceptionDefinition(10012, "开放平台客户编码不能为空");
+
 }

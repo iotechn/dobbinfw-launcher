@@ -158,6 +158,9 @@ public class ApiController {
                 // json 报文
                 OPData opData = JSONObject.parseObject(requestBody, OPData.class);
                 try {
+                    if (StringUtils.isEmpty(opData.getClientCode())) {
+                        throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_OPEN_CLIENT_CODE_CANNOT_BE_NULL);
+                    }
                     parameterMap = openPlatform.decrypt(opData.getClientCode(), opData.getCiphertext());
                 } catch (CryptoException e) {
                     throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_OPEN_PLATFORM_CHECK_FAILED);
@@ -365,7 +368,7 @@ public class ApiController {
                         throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_PARAM_CHECK_FAILED);
                     }
                 }
-                if (ignoreAdminLogin && isPrivateApi && httpMethod.openPlatform()) {
+                if (!ignoreAdminLogin && isPrivateApi && httpMethod.openPlatform()) {
                     throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_OPEN_PLATFORM_CHECK_FAILED);
                 }
             }
