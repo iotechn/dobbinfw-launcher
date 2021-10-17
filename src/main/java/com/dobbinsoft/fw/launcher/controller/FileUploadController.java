@@ -5,6 +5,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.dobbinsoft.fw.core.Const;
 import com.dobbinsoft.fw.core.entiy.inter.PermissionOwner;
 import com.dobbinsoft.fw.core.util.GeneratorUtil;
+import com.dobbinsoft.fw.launcher.inter.AfterFileUpload;
 import com.dobbinsoft.fw.launcher.permission.IAdminAuthenticator;
 import com.dobbinsoft.fw.support.storage.StorageClient;
 import com.dobbinsoft.fw.support.storage.StoragePrivateResult;
@@ -42,6 +43,9 @@ public class FileUploadController {
 
     @Autowired
     private IAdminAuthenticator adminAuthenticator;
+
+    @Autowired(required = false)
+    private AfterFileUpload afterFileUpload;
 
     private static final Logger logger = LoggerFactory.getLogger(FileUploadController.class);
 
@@ -93,6 +97,7 @@ public class FileUploadController {
                 storageRequest.setIs(inputStream);
                 storageRequest.setPath("private");
                 StoragePrivateResult result = storageClient.savePrivate(storageRequest);
+                afterFileUpload.afterPrivate(storageRequest.getFilename(), result.getUrl(), result.getKey(), file.getSize());
                 if (result.isSuc()) {
                     data.put("key", result.getKey());
                     data.put("url", result.getUrl());
@@ -136,6 +141,7 @@ public class FileUploadController {
             storageRequest.setIs(inputStream);
             storageRequest.setPath("commons");
             StorageResult result = storageClient.save(storageRequest);
+            afterFileUpload.afterPublic(storageRequest.getFilename(), result.getUrl(), file.getSize());
             if (result.isSuc()) {
                 data.put("url", result.getUrl());
                 data.put("errno", 200);
