@@ -3,6 +3,7 @@ package com.dobbinsoft.fw.launcher.controller;
 import cn.hutool.core.io.file.FileNameUtil;
 import com.alibaba.fastjson.JSONObject;
 import com.dobbinsoft.fw.core.util.GeneratorUtil;
+import com.dobbinsoft.fw.launcher.inter.BeforeUEditorFileUpload;
 import com.dobbinsoft.fw.support.image.ImageManager;
 import com.dobbinsoft.fw.support.image.ImageModel;
 import com.dobbinsoft.fw.support.model.Page;
@@ -18,6 +19,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import javax.servlet.http.HttpServletRequest;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.List;
@@ -36,12 +38,18 @@ public class UEditorController {
     @Autowired(required = false)
     private StorageClient storageClient;
 
+    @Autowired(required = false)
+    private BeforeUEditorFileUpload beforeUEditorFileUpload;
+
     private static final String SUCCESS = "SUCCESS";
 
     private static final String FAILED = "FAILED";
 
     @GetMapping("/cos")
-    public String cosGet(String action, String callback, Integer start, Integer size) {
+    public String cosGet(String action, String callback, Integer start, Integer size, HttpServletRequest request) throws Exception {
+        if (this.beforeUEditorFileUpload != null) {
+            this.beforeUEditorFileUpload.before(request);
+        }
         String res = "";
         if ("config".equals(action)) {
             // 客户端侧配置
@@ -63,7 +71,10 @@ public class UEditorController {
     }
 
     @PostMapping("/cos")
-    public String cosPost(String action, MultipartFile upfile) {
+    public String cosPost(String action, MultipartFile upfile, HttpServletRequest request) throws Exception{
+        if (this.beforeUEditorFileUpload != null) {
+            this.beforeUEditorFileUpload.before(request);
+        }
         if ("config".equals(action)) {
             InputStream inputStream = null;
             try {

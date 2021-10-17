@@ -6,6 +6,7 @@ import com.dobbinsoft.fw.core.Const;
 import com.dobbinsoft.fw.core.entiy.inter.PermissionOwner;
 import com.dobbinsoft.fw.core.util.GeneratorUtil;
 import com.dobbinsoft.fw.launcher.inter.AfterFileUpload;
+import com.dobbinsoft.fw.launcher.inter.BeforeFileUpload;
 import com.dobbinsoft.fw.launcher.permission.IAdminAuthenticator;
 import com.dobbinsoft.fw.support.storage.StorageClient;
 import com.dobbinsoft.fw.support.storage.StoragePrivateResult;
@@ -47,6 +48,9 @@ public class FileUploadController {
     @Autowired(required = false)
     private AfterFileUpload afterFileUpload;
 
+    @Autowired(required = false)
+    private BeforeFileUpload beforeFileUpload;
+
     private static final Logger logger = LoggerFactory.getLogger(FileUploadController.class);
 
 
@@ -59,7 +63,7 @@ public class FileUploadController {
      */
     @PostMapping("/admin")
     @ResponseBody
-    public Object createAdmin(@RequestParam("file") MultipartFile file, HttpServletRequest request, HttpServletResponse response) throws IOException{
+    public Object createAdmin(@RequestParam("file") MultipartFile file, HttpServletRequest request, HttpServletResponse response) throws IOException {
         response.setHeader("Access-Control-Allow-Origin", "*");
         String accessToken = request.getHeader(Const.ADMIN_ACCESS_TOKEN);
         PermissionOwner admin = adminAuthenticator.getAdmin(accessToken);
@@ -71,6 +75,7 @@ public class FileUploadController {
 
     /**
      * 后台通过服务器代理间接上传 私密文件（非公开URL）
+     *
      * @param file
      * @param request
      * @param response
@@ -79,8 +84,10 @@ public class FileUploadController {
      */
     @PostMapping("/admin/private")
     @ResponseBody
-    public Object createAdminPrivate(@RequestParam("file") MultipartFile file, HttpServletRequest request, HttpServletResponse response) throws IOException{
-        response.setHeader("Access-Control-Allow-Origin", "*");
+    public Object createAdminPrivate(@RequestParam("file") MultipartFile file, HttpServletRequest request, HttpServletResponse response) throws Exception {
+        if (this.beforeFileUpload != null) {
+            this.beforeFileUpload.before(request);
+        }
         String accessToken = request.getHeader(Const.ADMIN_ACCESS_TOKEN);
         PermissionOwner admin = adminAuthenticator.getAdmin(accessToken);
         if (admin != null) {
