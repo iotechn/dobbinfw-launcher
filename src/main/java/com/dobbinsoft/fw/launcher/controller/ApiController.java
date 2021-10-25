@@ -153,7 +153,10 @@ public class ApiController {
             }
             String contentType = request.getContentType();
             Map<String, String[]> parameterMap;
+            // 是否忽略管理员登录，若走的是开放平台，则该字段为true
             boolean ignoreAdminLogin = false;
+            // 若包含 ADMIN_ID || USER_ID 则此变量为true
+            boolean isPrivateApi = false;
             if (!StringUtils.isEmpty(contentType) && contentType.indexOf("application/json") > -1) {
                 // json 报文
                 OPData opData = JSONObject.parseObject(requestBody, OPData.class);
@@ -252,8 +255,6 @@ public class ApiController {
                     ip = request.getHeader("X-Real-IP");
                 }
             }
-            // 若包含 ADMIN_ID || USER_ID 则此变量为true
-            boolean isPrivateApi = false;
             for (int i = 0; i < methodParameters.length; i++) {
                 Parameter methodParam = methodParameters[i];
                 HttpParam httpParam = methodParam.getAnnotation(HttpParam.class);
@@ -368,7 +369,7 @@ public class ApiController {
                         throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_PARAM_CHECK_FAILED);
                     }
                 }
-                if (!ignoreAdminLogin && isPrivateApi && httpMethod.openPlatform()) {
+                if (ignoreAdminLogin && isPrivateApi && httpMethod.openPlatform()) {
                     throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_OPEN_PLATFORM_CHECK_FAILED);
                 }
             }

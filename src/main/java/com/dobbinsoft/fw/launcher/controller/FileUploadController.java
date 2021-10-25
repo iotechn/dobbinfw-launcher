@@ -3,11 +3,13 @@ package com.dobbinsoft.fw.launcher.controller;
 import cn.hutool.core.io.file.FileNameUtil;
 import com.alibaba.fastjson.JSONObject;
 import com.dobbinsoft.fw.core.Const;
+import com.dobbinsoft.fw.core.entiy.inter.IdentityOwner;
 import com.dobbinsoft.fw.core.entiy.inter.PermissionOwner;
 import com.dobbinsoft.fw.core.util.GeneratorUtil;
 import com.dobbinsoft.fw.launcher.inter.AfterFileUpload;
 import com.dobbinsoft.fw.launcher.inter.BeforeFileUpload;
 import com.dobbinsoft.fw.launcher.permission.IAdminAuthenticator;
+import com.dobbinsoft.fw.launcher.permission.IUserAuthenticator;
 import com.dobbinsoft.fw.support.storage.StorageClient;
 import com.dobbinsoft.fw.support.storage.StoragePrivateResult;
 import com.dobbinsoft.fw.support.storage.StorageRequest;
@@ -37,7 +39,7 @@ import java.util.Map;
 public class FileUploadController {
 
     @Autowired
-    private StringRedisTemplate userRedisTemplate;
+    private IUserAuthenticator userAuthenticator;
 
     @Autowired
     private StorageClient storageClient;
@@ -104,7 +106,9 @@ public class FileUploadController {
                 storageRequest.setIs(inputStream);
                 storageRequest.setPath("private");
                 StoragePrivateResult result = storageClient.savePrivate(storageRequest);
-                afterFileUpload.afterPrivate(storageRequest.getFilename(), result.getUrl(), result.getKey(), file.getSize());
+                if (this.afterFileUpload != null) {
+                    this.afterFileUpload.afterPrivate(storageRequest.getFilename(), result.getUrl(), result.getKey(), file.getSize());
+                }
                 if (result.isSuc()) {
                     data.put("key", result.getKey());
                     data.put("url", result.getUrl());
@@ -125,10 +129,13 @@ public class FileUploadController {
 
     @PostMapping("/user")
     @ResponseBody
-    public Object createUser(@RequestParam("file") MultipartFile file, HttpServletRequest request) throws IOException {
+    public Object createUser(@RequestParam("file") MultipartFile file, HttpServletRequest request) throws Exception {
+        if (this.beforeFileUpload != null) {
+            this.beforeFileUpload.before(request);
+        }
         String accessToken = request.getHeader(Const.USER_ACCESS_TOKEN);
-        String json = userRedisTemplate.opsForValue().get(Const.USER_REDIS_PREFIX + accessToken);
-        if (!ObjectUtils.isEmpty(json)) {
+        IdentityOwner user = userAuthenticator.getUser(accessToken);
+        if (user != null) {
             return commonsUpload(file);
         }
         throw new RuntimeException("权限不足");
@@ -148,7 +155,9 @@ public class FileUploadController {
             storageRequest.setIs(inputStream);
             storageRequest.setPath("commons");
             StorageResult result = storageClient.save(storageRequest);
-            afterFileUpload.afterPublic(storageRequest.getFilename(), result.getUrl(), file.getSize());
+            if (afterFileUpload != null) {
+                afterFileUpload.afterPublic(storageRequest.getFilename(), result.getUrl(), file.getSize());
+            }
             if (result.isSuc()) {
                 data.put("url", result.getUrl());
                 data.put("errno", 200);
@@ -175,8 +184,8 @@ public class FileUploadController {
     @ResponseBody
     public Object local(@RequestParam("file") MultipartFile file, String fsf, HttpServletRequest request) throws IOException {
         String accessToken = request.getHeader(Const.ADMIN_ACCESS_TOKEN);
-        String json = userRedisTemplate.opsForValue().get(Const.ADMIN_REDIS_PREFIX + accessToken);
-        if (!ObjectUtils.isEmpty(json)) {
+        IdentityOwner user = userAuthenticator.getUser(accessToken);
+        if (user != null) {
             int i = fsf.lastIndexOf("/");
             if (i > 0) {
                 String substring = fsf.substring(0, i);
