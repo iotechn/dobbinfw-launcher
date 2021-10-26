@@ -39,12 +39,17 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationContext;
 import org.springframework.stereotype.Controller;
 import org.springframework.util.ObjectUtils;
+import org.springframework.util.StreamUtils;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.multipart.MultipartHttpServletRequest;
 
 import javax.servlet.http.Cookie;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
+import java.io.IOException;
+import java.io.InputStream;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.*;
 import java.util.Collection;
@@ -120,6 +125,7 @@ public class ApiController {
             gatewayResponse.setTimestamp(invokeTime);
             gatewayResponse.setErrno(e.getCode());
             gatewayResponse.setErrmsg(e.getMessage());
+            gatewayResponse.setData(e.getAttach());
             return afterPost(res, invokeTime, gatewayResponse);
         } finally {
             if (openPlatform != null) {
@@ -365,8 +371,34 @@ public class ApiController {
                 } else if (httpParam.type() == HttpParamType.HEADER) {
                     String header = request.getHeader(httpParam.name());
                     args[i] = header;
-                    if (header == null && methodParam.getAnnotation(NotNull.class) != null) {
-                        throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_PARAM_CHECK_FAILED);
+                    NotNull annotation = methodParam.getAnnotation(NotNull.class);
+                    if (header == null && annotation != null) {
+                        this.throwParamCheckServiceException(annotation);
+                    }
+                } else if (httpParam.type() == HttpParamType.FILE) {
+                    // 读文件
+                    if (request instanceof MultipartHttpServletRequest) {
+                        MultipartHttpServletRequest multipartHttpServletRequest = (MultipartHttpServletRequest) request;
+                        MultipartFile file = multipartHttpServletRequest.getFile(httpParam.name());
+                        NotNull annotation = methodParam.getAnnotation(NotNull.class);
+                        if (file == null && annotation != null) {
+                            this.throwParamCheckServiceException(annotation);
+                        }
+                        if (file != null) {
+                            InputStream inputStream = null;
+                            try {
+                                inputStream = file.getInputStream();
+                                byte[] bytes = StreamUtils.copyToByteArray(inputStream);
+                                args[i] = bytes;
+                            } catch (IOException e) {
+                                throw e;
+                            } finally {
+                                if (inputStream != null)
+                                    inputStream.close();
+                            }
+                        }
+                    } else {
+                        throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_READ_FILE_JUST_SUPPORT_MULTIPART);
                     }
                 }
                 if (ignoreAdminLogin && isPrivateApi && httpMethod.openPlatform()) {

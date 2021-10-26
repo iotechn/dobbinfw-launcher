@@ -50,4 +50,7 @@ public class LauncherExceptionDefinition {
     public static final ServiceExceptionDefinition LAUNCHER_OPEN_CLIENT_CODE_CANNOT_BE_NULL =
             new ServiceExceptionDefinition(10012, "开放平台客户编码不能为空");
 
+    public static final ServiceExceptionDefinition LAUNCHER_READ_FILE_JUST_SUPPORT_MULTIPART =
+            new ServiceExceptionDefinition(10013, "请使用文件上传格式报文上传文件");
+
 }
