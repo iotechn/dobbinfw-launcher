@@ -75,7 +75,7 @@ public class UEditorController {
         if (this.beforeUEditorFileUpload != null) {
             this.beforeUEditorFileUpload.before(request);
         }
-        if ("config".equals(action)) {
+        if ("uploadimage".equals(action)) {
             InputStream inputStream = null;
             try {
                 String ext = FileNameUtil.getSuffix(upfile.getOriginalFilename());
