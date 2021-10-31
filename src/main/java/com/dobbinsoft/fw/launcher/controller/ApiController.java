@@ -115,6 +115,7 @@ public class ApiController {
         long invokeTime = System.currentTimeMillis();
         try {
             logger.info("[HTTP] requestId={}; request={}", invokeTime, JSONObject.toJSONString(req.getParameterMap()));
+            logger.info("[HEADER] requestId={}; header={}", invokeTime, JSONObject.toJSONString(req.getHeaderNames()));
             Object obj = process(req, res, requestBody, invokeTime);
             if (Const.IGNORE_PARAM_LIST.contains(obj.getClass())) {
                 return obj.toString();
