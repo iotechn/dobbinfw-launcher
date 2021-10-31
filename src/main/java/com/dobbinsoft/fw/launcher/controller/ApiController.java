@@ -258,6 +258,9 @@ public class ApiController {
             } else {
                 ip = request.getHeader("X-Forwarded-For");
                 if (StringUtils.isEmpty(ip)) {
+                    ip = request.getHeader("X-Forward-For");
+                }
+                if (StringUtils.isEmpty(ip)) {
                     ip = request.getHeader("X-Real-IP");
                 }
             }
