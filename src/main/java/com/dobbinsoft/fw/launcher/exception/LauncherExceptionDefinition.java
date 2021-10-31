@@ -54,6 +54,6 @@ public class LauncherExceptionDefinition {
             new ServiceExceptionDefinition(10013, "请使用文件上传格式报文上传文件");
 
     public static final ServiceExceptionDefinition LAUNCHER_GET_IP_FAILED =
-            new ServiceExceptionDefinition(10014, "获取用户IP失败");
+            new ServiceExceptionDefinition(10014, "获取用户IP失败，请联系管理员");
 
 }
