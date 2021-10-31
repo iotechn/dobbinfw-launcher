@@ -368,7 +368,7 @@ public class ApiController {
                 } else if (httpParam.type() == HttpParamType.IP) {
                     //这里根据实际情况来定。 若使用了负载均衡，Ip将会被代理服务器设置到某个Header里面
                     args[i] = ip;
-                    if (args[i] == null && methodParam.getAnnotation(NotNull.class) != null && !ignoreAdminLogin) {
+                    if (StringUtils.isEmpty(args[i]) && methodParam.getAnnotation(NotNull.class) != null && !ignoreAdminLogin) {
                         throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_GET_IP_FAILED);
                     }
                 } else if (httpParam.type() == HttpParamType.HEADER) {
