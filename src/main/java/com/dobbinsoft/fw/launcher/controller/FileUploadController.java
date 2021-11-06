@@ -66,7 +66,6 @@ public class FileUploadController {
     @PostMapping("/admin")
     @ResponseBody
     public Object createAdmin(@RequestParam("file") MultipartFile file, HttpServletRequest request, HttpServletResponse response) throws IOException {
-        response.setHeader("Access-Control-Allow-Origin", "*");
         String accessToken = request.getHeader(Const.ADMIN_ACCESS_TOKEN);
         PermissionOwner admin = adminAuthenticator.getAdmin(accessToken);
         if (admin != null) {
