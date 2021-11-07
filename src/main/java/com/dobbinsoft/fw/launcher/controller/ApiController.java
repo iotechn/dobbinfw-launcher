@@ -105,8 +105,11 @@ public class ApiController {
     @Autowired
     private RateLimiter rateLimiter;
 
-    @Value("${com.iotechn.unimall.env:1}")
+    @Value("${com.dobbinsoft.fw.env:1}")
     private String ENV;
+
+    @Value("${com.dobbinsoft.fw.enable-open-log:T}")
+    private String enableOpenLog;
 
     @Autowired
     private OtherExceptionTransferHolder otherExceptionTransferHolder;
@@ -116,7 +119,6 @@ public class ApiController {
     public String invoke(HttpServletRequest req, HttpServletResponse res, @RequestBody(required = false) String requestBody) {
         long invokeTime = System.currentTimeMillis();
         try {
-            logger.info("[HTTP] requestId={}; request={}", invokeTime, JSONObject.toJSONString(req.getParameterMap()));
             Object obj = process(req, res, requestBody, invokeTime);
             if (Const.IGNORE_PARAM_LIST.contains(obj.getClass())) {
                 return obj.toString();
@@ -183,8 +185,12 @@ public class ApiController {
                 }
                 openPlatform.setClientCode(opData.getClientCode());
                 ignoreAdminLogin = true;
+                if ("T".equals(this.enableOpenLog)) {
+                    logger.info("[HTTP] requestId={}; request={}", invokeTime, JSONObject.toJSONString(request.getParameterMap()));
+                }
             } else {
                 parameterMap = request.getParameterMap();
+                logger.info("[HTTP] requestId={}; request={}", invokeTime, JSONObject.toJSONString(request.getParameterMap()));
             }
             IApiManager apiManager = applicationContext.getBean(IApiManager.class);
             String[] gps = parameterMap.get("_gp");
@@ -311,29 +317,6 @@ public class ApiController {
                             Class<?> type = methodParam.getType();
                             Constructor<?> constructor = type.getConstructor(String.class);
                             args[i] = constructor.newInstance(httpParam.valueDef());
-                        } else {
-                            NotNull notNull = methodParam.getAnnotation(NotNull.class);
-                            if (notNull != null) {
-                                logger.error("missing :" + httpParam.name());
-                                this.throwParamCheckServiceException(notNull);
-                            }
-                            args[i] = null;
-                        }
-                    }
-                } else if (httpParam.type() == HttpParamType.MONEY) {
-                    // 若是钱，则
-                    String[] paramArray = parameterMap.get(httpParam.name());
-                    if (paramArray != null && paramArray.length > 0 && !StringUtils.isEmpty(paramArray[0])) {
-                        String priceRaw = paramArray[0];
-                        try {
-                            args[i] = Integer.parseInt((Float.parseFloat(priceRaw) * 100) + "");
-                        } catch (NumberFormatException e) {
-                            throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_PRICE_FORMAT_EXCEPTION);
-                        }
-                    } else {
-                        if (!StringUtils.isEmpty(httpParam.valueDef())) {
-                            //若有默认值
-                            args[i] = Integer.parseInt((Float.parseFloat(httpParam.valueDef()) * 100) + "");
                         } else {
                             NotNull notNull = methodParam.getAnnotation(NotNull.class);
                             if (notNull != null) {
