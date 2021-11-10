@@ -433,7 +433,11 @@ public class ApiController {
             throw e;
         } catch (Exception e) {
             Throwable target = e;
-            logger.info(e.getClass().getClassLoader() + "");
+            String token = request.getHeader(Const.ADMIN_ACCESS_TOKEN);
+            if (StringUtils.isEmpty(token)) {
+                token = request.getHeader(Const.USER_ACCESS_TOKEN);
+            }
+            logger.error("[HTTP] requestId={}; token={}, request={}", invokeTime, token, JSONObject.toJSONString(request.getParameterMap()));
             if (e instanceof InvocationTargetException) {
                 InvocationTargetException proxy = (InvocationTargetException) e;
                 Throwable targetException = proxy.getTargetException();
