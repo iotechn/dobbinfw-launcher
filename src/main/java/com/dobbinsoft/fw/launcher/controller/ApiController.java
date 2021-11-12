@@ -288,7 +288,7 @@ public class ApiController {
                             if (paramArray[0] != null) {
                                 args[i] = paramArray[0].trim();
                             } else {
-                                args[i] = 0;
+                                args[i] = null;
                             }
                         } else if (Const.IGNORE_PARAM_LIST.contains(type)) {
                             Constructor<?> constructor = type.getConstructor(String.class);
