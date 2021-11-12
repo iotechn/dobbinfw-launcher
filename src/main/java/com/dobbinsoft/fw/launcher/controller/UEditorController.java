@@ -3,6 +3,7 @@ package com.dobbinsoft.fw.launcher.controller;
 import cn.hutool.core.io.file.FileNameUtil;
 import com.alibaba.fastjson.JSONObject;
 import com.dobbinsoft.fw.core.util.GeneratorUtil;
+import com.dobbinsoft.fw.launcher.inter.BeforeFileUploadPath;
 import com.dobbinsoft.fw.launcher.inter.BeforeUEditorFileUpload;
 import com.dobbinsoft.fw.support.image.ImageManager;
 import com.dobbinsoft.fw.support.image.ImageModel;
@@ -39,6 +40,9 @@ public class UEditorController {
 
     @Autowired(required = false)
     private BeforeUEditorFileUpload beforeUEditorFileUpload;
+
+    @Autowired(required = false)
+    private BeforeFileUploadPath beforeFileUploadPath;
 
     private static final String SUCCESS = "SUCCESS";
 
@@ -85,7 +89,11 @@ public class UEditorController {
                 storageRequest.setSize(upfile.getSize());
                 inputStream = upfile.getInputStream();
                 storageRequest.setIs(inputStream);
-                storageRequest.setPath("ueditor");
+                if (this.beforeFileUploadPath != null) {
+                    storageRequest.setPath(this.beforeFileUploadPath.setPath("commons"));
+                } else {
+                    storageRequest.setPath("commons");
+                }
                 StorageResult result = storageClient.save(storageRequest);
                 if (result.isSuc()) {
                     ImageModel imageModel = new ImageModel();

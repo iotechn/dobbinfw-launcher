@@ -8,6 +8,7 @@ import com.dobbinsoft.fw.core.entiy.inter.PermissionOwner;
 import com.dobbinsoft.fw.core.util.GeneratorUtil;
 import com.dobbinsoft.fw.launcher.inter.AfterFileUpload;
 import com.dobbinsoft.fw.launcher.inter.BeforeFileUpload;
+import com.dobbinsoft.fw.launcher.inter.BeforeFileUploadPath;
 import com.dobbinsoft.fw.launcher.permission.IAdminAuthenticator;
 import com.dobbinsoft.fw.launcher.permission.IUserAuthenticator;
 import com.dobbinsoft.fw.support.storage.StorageClient;
@@ -52,6 +53,9 @@ public class FileUploadController {
 
     @Autowired(required = false)
     private BeforeFileUpload beforeFileUpload;
+
+    @Autowired(required = false)
+    private BeforeFileUploadPath beforeFileUploadPath;
 
     private static final Logger logger = LoggerFactory.getLogger(FileUploadController.class);
 
@@ -152,7 +156,11 @@ public class FileUploadController {
             storageRequest.setSize(file.getSize());
             inputStream = file.getInputStream();
             storageRequest.setIs(inputStream);
-            storageRequest.setPath("commons");
+            if (this.beforeFileUploadPath != null) {
+                storageRequest.setPath(this.beforeFileUploadPath.setPath("commons"));
+            } else {
+                storageRequest.setPath("commons");
+            }
             StorageResult result = storageClient.save(storageRequest);
             if (afterFileUpload != null) {
                 afterFileUpload.afterPublic(storageRequest.getFilename(), result.getUrl(), file.getSize());

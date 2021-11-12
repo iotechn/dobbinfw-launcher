@@ -285,7 +285,11 @@ public class ApiController {
                         //参数校验
                         checkParam(type, methodParam, paramArray[0]);
                         if (String.class == type) {
-                            args[i] = paramArray[0];
+                            if (paramArray[0] != null) {
+                                args[i] = paramArray[0].trim();
+                            } else {
+                                args[i] = 0;
+                            }
                         } else if (Const.IGNORE_PARAM_LIST.contains(type)) {
                             Constructor<?> constructor = type.getConstructor(String.class);
                             args[i] = constructor.newInstance(paramArray[0]);
