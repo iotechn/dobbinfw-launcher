@@ -69,7 +69,7 @@ public class FileUploadController {
      */
     @PostMapping("/admin")
     @ResponseBody
-    public Object createAdmin(@RequestParam("file") MultipartFile file, HttpServletRequest request, HttpServletResponse response) throws IOException {
+    public Object createAdmin(@RequestParam("file") MultipartFile file, HttpServletRequest request, HttpServletResponse response) throws Exception {
         if (this.beforeFileUpload != null) {
             this.beforeFileUpload.before(request);
         }
