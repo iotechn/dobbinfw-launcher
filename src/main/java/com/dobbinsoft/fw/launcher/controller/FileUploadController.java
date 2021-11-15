@@ -70,6 +70,9 @@ public class FileUploadController {
     @PostMapping("/admin")
     @ResponseBody
     public Object createAdmin(@RequestParam("file") MultipartFile file, HttpServletRequest request, HttpServletResponse response) throws IOException {
+        if (this.beforeFileUpload != null) {
+            this.beforeFileUpload.before(request);
+        }
         String accessToken = request.getHeader(Const.ADMIN_ACCESS_TOKEN);
         PermissionOwner admin = adminAuthenticator.getAdmin(accessToken);
         if (admin != null) {
