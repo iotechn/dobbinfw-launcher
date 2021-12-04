@@ -345,6 +345,7 @@ public class ApiController {
                     String accessToken = request.getHeader(Const.ADMIN_ACCESS_TOKEN);
                     PermissionOwner adminDTO = adminAuthenticator.getAdmin(accessToken);
                     if (adminDTO != null) {
+                        sessionUtil.setAdmin(adminDTO);
                         args[i] = adminDTO.getId();
                         personId = adminDTO.getId();
                     }
@@ -441,7 +442,6 @@ public class ApiController {
             if (StringUtils.isEmpty(token)) {
                 token = request.getHeader(Const.USER_ACCESS_TOKEN);
             }
-            logger.error("[HTTP] requestId={}; token={}, request={}", invokeTime, token, JSONObject.toJSONString(request.getParameterMap()));
             if (e instanceof InvocationTargetException) {
                 InvocationTargetException proxy = (InvocationTargetException) e;
                 Throwable targetException = proxy.getTargetException();
@@ -450,6 +450,7 @@ public class ApiController {
                     throw (ServiceException) targetException;
                 }
             }
+            logger.error("[HTTP] requestId={}; token={}, request={}", invokeTime, token, JSONObject.toJSONString(request.getParameterMap()));
             Class<? extends Throwable> clazz = target.getClass();
             OtherExceptionTransfer transfer = otherExceptionTransferHolder.getByClass(clazz);
             ServiceException afterTransServiceException = transfer.trans(e);
