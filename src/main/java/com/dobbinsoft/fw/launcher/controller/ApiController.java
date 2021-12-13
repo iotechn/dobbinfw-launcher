@@ -397,7 +397,7 @@ public class ApiController {
                         throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_READ_FILE_JUST_SUPPORT_MULTIPART);
                     }
                 }
-                if (ignoreAdminLogin && isPrivateApi && httpMethod.openPlatform()) {
+                if (!ignoreAdminLogin && isPrivateApi && httpMethod.openPlatform()) {
                     throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_OPEN_PLATFORM_CHECK_FAILED);
                 }
             }
