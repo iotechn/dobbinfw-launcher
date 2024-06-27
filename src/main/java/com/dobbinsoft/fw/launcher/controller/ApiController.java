@@ -1,73 +1,76 @@
 package com.dobbinsoft.fw.launcher.controller;
 
-import cn.hutool.crypto.CryptoException;
-import com.alibaba.fastjson.JSONObject;
-import com.alibaba.fastjson.serializer.SerializerFeature;
 import com.dobbinsoft.fw.core.Const;
+import com.dobbinsoft.fw.core.annotation.HttpExcel;
 import com.dobbinsoft.fw.core.annotation.HttpMethod;
 import com.dobbinsoft.fw.core.annotation.HttpParam;
 import com.dobbinsoft.fw.core.annotation.HttpParamType;
-import com.dobbinsoft.fw.core.annotation.ResultType;
 import com.dobbinsoft.fw.core.annotation.param.NotNull;
-import com.dobbinsoft.fw.core.annotation.param.Range;
-import com.dobbinsoft.fw.core.annotation.param.TextFormat;
+import com.dobbinsoft.fw.core.entiy.inter.CustomAccountOwner;
 import com.dobbinsoft.fw.core.entiy.inter.IdentityOwner;
 import com.dobbinsoft.fw.core.entiy.inter.PermissionOwner;
+import com.dobbinsoft.fw.core.exception.CoreExceptionDefinition;
 import com.dobbinsoft.fw.core.exception.ServiceException;
 import com.dobbinsoft.fw.core.model.GatewayResponse;
 import com.dobbinsoft.fw.core.util.ISessionUtil;
-import com.dobbinsoft.fw.launcher.exception.LauncherExceptionDefinition;
-import com.dobbinsoft.fw.launcher.exception.LauncherServiceException;
 import com.dobbinsoft.fw.launcher.exception.OtherExceptionTransfer;
 import com.dobbinsoft.fw.launcher.exception.OtherExceptionTransferHolder;
 import com.dobbinsoft.fw.launcher.inter.AfterHttpMethod;
 import com.dobbinsoft.fw.launcher.inter.BeforeHttpMethod;
 import com.dobbinsoft.fw.launcher.inter.BeforeProcess;
 import com.dobbinsoft.fw.launcher.invoker.CustomInvoker;
-import com.dobbinsoft.fw.launcher.log.AccessLog;
-import com.dobbinsoft.fw.launcher.log.AccessLogger;
 import com.dobbinsoft.fw.launcher.manager.IApiManager;
 import com.dobbinsoft.fw.launcher.permission.IAdminAuthenticator;
+import com.dobbinsoft.fw.launcher.permission.ICustomAuthenticator;
 import com.dobbinsoft.fw.launcher.permission.IUserAuthenticator;
-import com.dobbinsoft.fw.support.component.open.OpenPlatform;
-import com.dobbinsoft.fw.support.component.open.model.OPData;
+import com.dobbinsoft.fw.support.properties.FwRpcProviderProperties;
 import com.dobbinsoft.fw.support.rate.RateLimiter;
+import com.dobbinsoft.fw.support.rpc.RpcProviderUtils;
+import com.dobbinsoft.fw.support.utils.*;
+import com.dobbinsoft.fw.support.utils.excel.ExcelData;
+import com.dobbinsoft.fw.support.utils.excel.ExcelUtils;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationContext;
-import org.springframework.stereotype.Controller;
+import org.springframework.http.MediaType;
 import org.springframework.util.ObjectUtils;
 import org.springframework.util.StreamUtils;
-import org.springframework.util.StringUtils;
-import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
-import org.springframework.web.bind.annotation.ResponseBody;
+import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.multipart.MultipartHttpServletRequest;
 
-import javax.servlet.http.Cookie;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.lang.annotation.Annotation;
-import java.lang.reflect.*;
-import java.util.Collection;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.lang.reflect.Parameter;
+import java.math.BigDecimal;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * Created with IntelliJ IDEA.
- * Description:
- * User: rize
- * Date: 2018-08-08
- * Time: 下午11:00
+ * API Controller，RPC/WEB 调用流量入口。统一的方法路由，参数校验等逻辑。
  */
-@Controller
-@RequestMapping("/m.api")
+@RestController
+@RequestMapping("/")
 public class ApiController {
 
     private static final Logger logger = LoggerFactory.getLogger(ApiController.class);
@@ -94,10 +97,7 @@ public class ApiController {
     private IAdminAuthenticator adminAuthenticator;
 
     @Autowired(required = false)
-    private AccessLogger accessLogger;
-
-    @Autowired(required = false)
-    private OpenPlatform openPlatform;
+    private ICustomAuthenticator customAuthenticator;
 
     @Autowired
     private CustomInvoker customInvoker;
@@ -105,36 +105,95 @@ public class ApiController {
     @Autowired
     private RateLimiter rateLimiter;
 
-    @Value("${com.dobbinsoft.fw.env:1}")
-    private String ENV;
-
-    @Value("${com.dobbinsoft.fw.enable-open-log:T}")
-    private String enableOpenLog;
-
     @Autowired
     private OtherExceptionTransferHolder otherExceptionTransferHolder;
 
-    @RequestMapping(method = {RequestMethod.POST, RequestMethod.GET})
-    @ResponseBody
-    public String invoke(HttpServletRequest req, HttpServletResponse res, @RequestBody(required = false) String requestBody) {
+    @Autowired(required = false)
+    private RpcProviderUtils rpcProviderUtils;
+
+    private static final String APPLICATION_XLS_X = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+    @RequestMapping(value = {"/rpc", "/rpc/{_gp}/{_mt}"}, method = {RequestMethod.POST, RequestMethod.GET})
+    public void rpcInvoke(
+            HttpServletRequest req,
+            HttpServletResponse res,
+            @PathVariable(required = false) String _gp,
+            @PathVariable(required = false) String _mt) throws IOException {
+        try {
+            // Valid rpc token
+            String jwtToken = req.getHeader(Const.RPC_HEADER);
+            String systemId = req.getHeader(Const.RPC_SYSTEM_ID);
+            if (rpcProviderUtils == null) {
+                logger.error("[RPC] You need to add @EnableRpc");
+            }
+            JwtUtils.JwtResult jwtResult = rpcProviderUtils.validToken(systemId, jwtToken);
+            if (jwtResult.getResult() != JwtUtils.Result.SUCCESS) {
+                throw new ServiceException(CoreExceptionDefinition.LAUNCHER_RPC_SIGN_INCORRECT);
+            }
+        } catch (ServiceException e) {
+            try (OutputStream os = res.getOutputStream()) {
+                byte[] result = buildServiceResult(res, System.currentTimeMillis(), e).getBytes(StandardCharsets.UTF_8);
+                os.write(result);
+                return;
+            }
+        }
+        commonsInvoke(req, res, _gp, _mt, ApiEntry.RPC);
+    }
+
+    @RequestMapping(value = {"/m.api", "/m.api/{_gp}/{_mt}"}, method = {RequestMethod.POST, RequestMethod.GET})
+    public void invoke(
+            HttpServletRequest req,
+            HttpServletResponse res,
+            @PathVariable(required = false) String _gp,
+            @PathVariable(required = false) String _mt) throws IOException {
+        commonsInvoke(req, res, _gp, _mt, ApiEntry.WEB);
+    }
+
+    private void commonsInvoke(HttpServletRequest req, HttpServletResponse res, String _gp, String _mt, ApiEntry apiEntry) throws IOException {
+        byte[] result;
         long invokeTime = System.currentTimeMillis();
         try {
-            Object obj = process(req, res, requestBody, invokeTime);
+            ApiContext context = this.findContext(req, _gp, _mt, apiEntry);
+            Object obj = process(req, res, context);
             if (Const.IGNORE_PARAM_LIST.contains(obj.getClass())) {
-                return obj.toString();
+                result = obj.toString().getBytes(StandardCharsets.UTF_8);
+            } else if (context.httpExcel != null && obj instanceof GatewayResponse<?> gatewayResponse) {
+                res.setContentType(APPLICATION_XLS_X);
+                // 直接输出文件
+                ExcelData<?> excelData = new ExcelData<>();
+                List data = (List<?>) gatewayResponse.getData();
+                excelData.setData(data);
+                excelData.setFileName(context.httpExcel.fileName() + "-" + new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
+                ExcelUtils.exportExcel(res, excelData, context.httpExcel.clazz());
+                afterPost(res, invokeTime, obj, false);
+                return;
+            } else if (obj instanceof GatewayResponse<?> gatewayResponse) {
+                gatewayResponse.setTimestamp(invokeTime);
+                if (StringUtils.isNotEmpty(gatewayResponse.getContentType())) {
+                    res.setContentType(gatewayResponse.getContentType());
+                } else {
+                    res.setContentType(MediaType.APPLICATION_JSON_VALUE);
+                }
+                Object data = gatewayResponse.getData();
+                if (data instanceof byte[]) {
+                    result = (byte[]) data;
+                    afterPost(res, invokeTime, obj, false);
+                } else {
+                    result = afterPost(res, invokeTime, obj, true).getBytes(StandardCharsets.UTF_8);
+                }
+            } else {
+                res.setContentType(MediaType.APPLICATION_JSON_VALUE);
+                result = afterPost(res, invokeTime, obj, true).getBytes(StandardCharsets.UTF_8);
             }
-            return afterPost(res, invokeTime, obj);
         } catch (ServiceException e) {
-            GatewayResponse gatewayResponse = new GatewayResponse();
-            gatewayResponse.setTimestamp(invokeTime);
-            gatewayResponse.setErrno(e.getCode());
-            gatewayResponse.setErrmsg(e.getMessage());
-            gatewayResponse.setData(e.getAttach());
-            return afterPost(res, invokeTime, gatewayResponse);
+            res.setContentType(MediaType.APPLICATION_JSON_VALUE);
+            result = buildServiceResult(res, invokeTime, e).getBytes(StandardCharsets.UTF_8);
         } finally {
-            if (openPlatform != null) {
-                openPlatform.removeClientCode();
-            }
+            MDC.clear();
+            sessionUtil.clear();
+        }
+        try (OutputStream os = res.getOutputStream()) {
+            os.write(result);
         }
     }
 
@@ -145,10 +204,13 @@ public class ApiController {
      * @param obj 调用结果
      * @return
      */
-    private String afterPost(HttpServletResponse res, long invokeTime, Object obj) {
-        String result = JSONObject.toJSONString(obj, SerializerFeature.WriteMapNullValue, SerializerFeature.WriteDateUseDateFormat);
+    private String afterPost(HttpServletResponse res, long invokeTime, Object obj, boolean json) {
         long during = System.currentTimeMillis() - invokeTime;
-        logger.info("[HTTP] requestId={}; response={}; during={}ms", invokeTime, JSONObject.toJSONString(result), during);
+        String result = "";
+        if (json) {
+            result = JacksonUtil.toJSONString(obj);
+            logger.info("[HTTP] R={}; D={}ms", JacksonUtil.toJSONString(result), during);
+        }
         if (afterHttpMethod != null) {
             afterHttpMethod.after(res, result);
         }
@@ -156,101 +218,122 @@ public class ApiController {
     }
 
 
-    private Object process(HttpServletRequest request, HttpServletResponse response, String requestBody, long invokeTime) throws ServiceException {
+    /**
+     * 获取请求上下文
+     * @param request
+     * @param _gp 已知晓_gp
+     * @param _mt 已知晓_mt
+     * @param apiEntry API入口，决定分组
+     * @return
+     * @throws ServiceException 服务异常
+     */
+    private ApiContext findContext(HttpServletRequest request, String _gp, String _mt, ApiEntry apiEntry) throws ServiceException {
+        ApiContext apiContext = new ApiContext();
+        // 判断请求类型
+        String contentType = request.getContentType();
+        if (MediaType.APPLICATION_JSON_VALUE.equals(contentType)) {
+            try (InputStream is = request.getInputStream()) {
+                String json = IOUtils.toString(is);
+                Map<String, Object> map = JacksonUtil.toMap(json, String.class, Object.class);
+                Map<String, String> newMap = new HashMap<>();
+                if (map != null) {
+                    // 支持Post空传参
+                    map.forEach((k, v) -> {
+                        if (v == null) {
+                            return;
+                        }
+                        if (Const.IGNORE_PARAM_LIST.contains(v.getClass())) {
+                            newMap.put(k, v.toString());
+                        } else {
+                            newMap.put(k, JacksonUtil.toJSONString(v));
+                        }
+                    });
+                }
+                apiContext.setParameterSingleMap(newMap);
+            } catch (IOException e) {
+                throw new ServiceException(CoreExceptionDefinition.LAUNCHER_IO_EXCEPTION);
+            }
+
+        } else if (StringUtils.isEmpty(contentType) || contentType.startsWith(MediaType.APPLICATION_FORM_URLENCODED_VALUE)){
+            // GET请求时， contentType为null
+            Map<String, String[]> parameterMap = request.getParameterMap();
+            apiContext.setParameterMap(parameterMap);
+        } else if (contentType.startsWith(MediaType.MULTIPART_FORM_DATA_VALUE)) {
+            Map<String, String[]> parameterMap = request.getParameterMap();
+            apiContext.setParameterMap(parameterMap);
+        } else {
+            throw new ServiceException(CoreExceptionDefinition.LAUNCHER_CONTENT_TYPE_NOT_SUPPORT);
+        }
+        IApiManager apiManager = applicationContext.getBean(IApiManager.class);
+        if (StringUtils.isNotEmpty(_gp) && StringUtils.isNotEmpty(_mt)) {
+            apiContext._gp = _gp;
+            apiContext._mt = _mt;
+        } else {
+            apiContext._gp = apiContext.getParameter("_gp");
+            apiContext._mt = apiContext.getParameter("_mt");
+            if (apiContext._gp == null || apiContext._mt == null) {
+                throw new ServiceException(CoreExceptionDefinition.LAUNCHER_API_NOT_EXISTS);
+            }
+        }
+        apiContext.method = apiEntry == ApiEntry.WEB ? apiManager.getMethod(apiContext._gp, apiContext._mt) : apiManager.getRpcMethod(apiContext._gp, apiContext._mt);
+        if (apiContext.method == null) {
+            throw new ServiceException(CoreExceptionDefinition.LAUNCHER_API_NOT_EXISTS);
+        }
+        apiContext.httpMethod = apiContext.method.getAnnotation(HttpMethod.class);
+        if (apiContext.httpMethod == null) {
+            //只起标记作用防止调到封闭方法了
+            throw new ServiceException(CoreExceptionDefinition.LAUNCHER_API_NOT_EXISTS);
+        }
+        apiContext.httpExcel = apiContext.method.getAnnotation(HttpExcel.class);
+        String trace = request.getHeader(Const.HTTP_TRACE_HEADER);
+        if (StringUtils.isEmpty(trace)) {
+            // 可能会冲突
+            trace = System.currentTimeMillis() + "";
+        }
+        MDC.put("trace", trace);
+        return apiContext;
+    }
+
+
+    /**
+     * 调用HttpMethod
+     * @param request
+     * @param response
+     * @param apiContext
+     * @return 返回HttpMethod原始返回
+     * @throws ServiceException
+     */
+    private Object process(HttpServletRequest request, HttpServletResponse response, ApiContext apiContext) throws ServiceException {
         try {
             if (this.beforeProcess != null) {
                 this.beforeProcess.before(request);
             }
-            String contentType = request.getContentType();
-            Map<String, String[]> parameterMap;
-            // 是否忽略管理员登录，若走的是开放平台，则该字段为true
-            boolean ignoreAdminLogin = false;
-            // 若包含 ADMIN_ID || USER_ID 则此变量为true
-            boolean isPrivateApi = false;
-            if (!StringUtils.isEmpty(contentType) && contentType.indexOf("application/json") > -1) {
-                // json 报文
-                OPData opData = JSONObject.parseObject(requestBody, OPData.class);
-                try {
-                    if (StringUtils.isEmpty(opData.getClientCode())) {
-                        throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_OPEN_CLIENT_CODE_CANNOT_BE_NULL);
-                    }
-                    parameterMap = openPlatform.decrypt(opData.getClientCode(), opData.getCiphertext());
-                } catch (CryptoException e) {
-                    throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_OPEN_PLATFORM_CHECK_FAILED);
-                }
-                Long optimestamp = Long.parseLong(parameterMap.get("optimestamp")[0]);
-                // TODO API 白名单校验
-                if (Math.abs(optimestamp - System.currentTimeMillis()) > 1000L * 60 * 3) {
-                    throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_OPEN_PLATFORM_TIMESTAMP_CHECKED);
-                }
-                openPlatform.setClientCode(opData.getClientCode());
-                ignoreAdminLogin = true;
-                if ("T".equals(this.enableOpenLog)) {
-                    logger.info("[HTTP] requestId={}; request={}", invokeTime, JSONObject.toJSONString(request.getParameterMap()));
-                }
-            } else {
-                parameterMap = request.getParameterMap();
-                logger.info("[HTTP] requestId={}; request={}", invokeTime, JSONObject.toJSONString(request.getParameterMap()));
-            }
             IApiManager apiManager = applicationContext.getBean(IApiManager.class);
-            String[] gps = parameterMap.get("_gp");
-            String[] mts = parameterMap.get("_mt");
-            String[] apps = parameterMap.get("_app");
-            if (gps == null || mts == null || gps.length == 0 || mts.length == 0) {
-                throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_API_NOT_EXISTS);
-            }
-            String _gp = gps[0];
-            String _mt = mts[0];
-            // 决定路由到某个系统，单体应用可忽略此字段。
-            String _app = (apps == null || apps.length == 0) ? "_app" : apps[0];
-            String[] _types = parameterMap.get("_type");
-            String _type = null;
-            if (_types != null && _types.length > 0) {
-                _type = _types[0];
-            }
-            Method method = apiManager.getMethod(_app, _gp, _mt);
-            if (method == null) {
-                throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_API_NOT_EXISTS);
-            }
-            HttpMethod httpMethod = method.getAnnotation(HttpMethod.class);
-            if (httpMethod == null) {
-                //只起标记作用防止调到封闭方法了
-                throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_API_NOT_EXISTS);
-            }
+            Method method = apiContext.method;
+            String _gp = apiContext._gp;
+            String _mt = apiContext._mt;
+            HttpMethod httpMethod = apiContext.httpMethod;
+
+            logger.info("[HTTP] Q={}", JacksonUtil.toJSONString(apiContext.getParameterMap() == null ? apiContext.getParameterSingleMap() : apiContext.getParameterMap()));
             if (this.beforeHttpMethod != null) {
                 this.beforeHttpMethod.before(request, _gp, _mt, httpMethod);
             }
             String permission = httpMethod.permission();
-            if (!StringUtils.isEmpty(permission)) {
+            if (StringUtils.isNotEmpty(permission)) {
                 //若需要权限，则校验当前用户是否具有权限
                 String accessToken = request.getHeader(Const.ADMIN_ACCESS_TOKEN);
                 PermissionOwner adminDTO = adminAuthenticator.getAdmin(accessToken);
                 sessionUtil.setAdmin(adminDTO);
-                if ((adminDTO == null || !sessionUtil.hasPerm(permission)) && !ignoreAdminLogin) {
-                    /**
-                     * 权限不足有两种可能
-                     * 1. 可走开放平台
-                     * 2. 确实没有权限，也不走开放平台，则抛出异常
-                     */
+                if ((adminDTO == null || !sessionUtil.hasPerm(permission))) {
+                    // 没有权限
                     if (adminDTO == null) {
-                        throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_ADMIN_NOT_LOGIN);
+                        throw new ServiceException(CoreExceptionDefinition.LAUNCHER_ADMIN_NOT_LOGIN);
                     } else {
                         String permissionRoute = apiManager.getPermissionRoute(permission);
-                        if (!StringUtils.isEmpty(permissionRoute)) {
-                            throw new LauncherServiceException("权限不足，请分配 " + permissionRoute, LauncherExceptionDefinition.LAUNCHER_ADMIN_PERMISSION_DENY.getCode());
+                        if (StringUtils.isNotEmpty(permissionRoute)) {
+                            throw new ServiceException("权限不足，请分配 " + permissionRoute, CoreExceptionDefinition.LAUNCHER_ADMIN_PERMISSION_DENY.getCode());
                         }
-                        throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_ADMIN_PERMISSION_DENY);
-                    }
-                }
-                // 对有权限的方法进行日志记录
-                if (accessLogger != null) {
-                    if (adminDTO != null) {
-                        AccessLog accessLog = new AccessLog();
-                        accessLog.setAdminId(adminDTO.getId());
-                        accessLog.setGroup(_gp);
-                        accessLog.setMethod(_mt);
-                        accessLog.setRequestId(invokeTime);
-                        accessLogger.save(accessLog);
+                        throw new ServiceException(CoreExceptionDefinition.LAUNCHER_ADMIN_PERMISSION_DENY);
                     }
                 }
             }
@@ -259,74 +342,55 @@ public class ApiController {
             Object[] args = new Object[methodParameters.length];
             // 用户或管理员的ID，用于限流
             Long personId = null;
-            String ip;
-            if (ENV.equals("1")) {
-                //若是开发环境
-                ip = "27.10.60.71";
-            } else {
-                ip = request.getHeader("X-Forwarded-For");
-                if (StringUtils.isEmpty(ip)) {
-                    ip = request.getHeader("X-Forward-For");
-                }
-                if (StringUtils.isEmpty(ip)) {
-                    ip = request.getHeader("X-Real-IP");
-                }
-            }
+            String ip = RequestUtils.getClientIp(request);
             for (int i = 0; i < methodParameters.length; i++) {
                 Parameter methodParam = methodParameters[i];
                 HttpParam httpParam = methodParam.getAnnotation(HttpParam.class);
                 if (httpParam == null) {
-                    throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_API_NOT_EXISTS);
+                    throw new ServiceException(CoreExceptionDefinition.LAUNCHER_API_NOT_EXISTS);
                 }
                 if (httpParam.type() == HttpParamType.COMMON) {
-                    String[] paramArray = parameterMap.get(httpParam.name());
-                    if (paramArray != null && paramArray.length > 0 && !StringUtils.isEmpty(paramArray[0])) {
+                    String value = apiContext.getParameter(httpParam.name());
+                    if (StringUtils.isEmpty(value) && StringUtils.isNotEmpty(httpParam.valueDef())) {
+                        value = httpParam.valueDef();
+                    }
+                    if (StringUtils.isNotEmpty(value)) {
                         Class<?> type = methodParam.getType();
-                        //参数校验
-                        checkParam(type, methodParam, paramArray[0]);
+                        ValidateUtils.checkParam(type, methodParam, value);
                         if (String.class == type) {
-                            if (paramArray[0] != null) {
-                                args[i] = paramArray[0].trim();
-                            } else {
-                                args[i] = null;
-                            }
+                            args[i] = value.trim();
                         } else if (Const.IGNORE_PARAM_LIST.contains(type)) {
                             Constructor<?> constructor = type.getConstructor(String.class);
-                            args[i] = constructor.newInstance(paramArray[0]);
-                        } else if (type.isArray()) {
-                            //若是数组
-                            Class<?> itemType = type.getComponentType();
-                            Object realType[] = (Object[]) Array.newInstance(itemType, paramArray.length);
-                            if (paramArray.length > 0) {
-                                for (int j = 0; j < paramArray.length; j++) {
-                                    if (Const.IGNORE_PARAM_LIST.contains(itemType)) {
-                                        Constructor<?> constructor = itemType.getConstructor(String.class);
-                                        realType[j] = constructor.newInstance(paramArray[j]);
-                                    } else {
-                                        realType[j] = JSONObject.parseObject(paramArray[j], itemType);
-                                    }
-                                }
+                            try {
+                                args[i] = constructor.newInstance(value);
+                            } catch (NumberFormatException e) {
+                                throw new ServiceException(CoreExceptionDefinition.LAUNCHER_NUMBER_PARSE_ERROR);
                             }
-                            args[i] = realType;
                         } else if (type == List.class) {
-                            args[i] = JSONObject.parseArray(paramArray[0], httpParam.arrayClass());
+                            args[i] = JacksonUtil.parseArray(value, httpParam.arrayClass());
+                        } else if (type == LocalDateTime.class) {
+                            args[i] = TimeUtils.stringToLocalDateTime(value);
+                        } else if (type == LocalDate.class) {
+                            args[i] = TimeUtils.stringToLocalDate(value);
+                        } else if (type == LocalTime.class) {
+                            args[i] = TimeUtils.stringToLocalTime(value);
+                        } else if (type == Date.class) {
+                            args[i] = TimeUtils.stringToDate(value);
+                        } else if (type == BigDecimal.class) {
+                            args[i] = new BigDecimal(value);
                         } else {
                             //Json解析
-                            args[i] = JSONObject.parseObject(paramArray[0], type);
-                            this.checkParam(args[i]);
+                            args[i] = JacksonUtil.parseObject(value, type);
+                            ValidateUtils.checkParam(args[i]);
                         }
                     } else {
-                        if (!StringUtils.isEmpty(httpParam.valueDef())) {
+                        if (StringUtils.isNotEmpty(httpParam.valueDef())) {
                             //若有默认值
                             Class<?> type = methodParam.getType();
                             Constructor<?> constructor = type.getConstructor(String.class);
                             args[i] = constructor.newInstance(httpParam.valueDef());
                         } else {
-                            NotNull notNull = methodParam.getAnnotation(NotNull.class);
-                            if (notNull != null) {
-                                logger.error("missing :" + httpParam.name());
-                                this.throwParamCheckServiceException(notNull);
-                            }
+                            ValidateUtils.checkParam(methodParam.getType(), methodParam, httpParam.valueDef());
                             args[i] = null;
                         }
                     }
@@ -336,10 +400,11 @@ public class ApiController {
                     if (user != null) {
                         args[i] = user.getId();
                         personId = user.getId();
+                        MDC.put("account", "USER_" + personId);
+                        MDC.put("token", accessToken);
                     }
-                    isPrivateApi = true;
                     if (args[i] == null && methodParam.getAnnotation(NotNull.class) != null) {
-                        throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_USER_NOT_LOGIN);
+                        throw new ServiceException(CoreExceptionDefinition.LAUNCHER_USER_NOT_LOGIN);
                     }
                 } else if (httpParam.type() == HttpParamType.ADMIN_ID) {
                     String accessToken = request.getHeader(Const.ADMIN_ACCESS_TOKEN);
@@ -348,318 +413,160 @@ public class ApiController {
                         sessionUtil.setAdmin(adminDTO);
                         args[i] = adminDTO.getId();
                         personId = adminDTO.getId();
+                        MDC.put("account", "ADMIN_" + personId);
+                        MDC.put("token", accessToken);
                     }
-                    isPrivateApi = true;
-                    if (args[i] == null && methodParam.getAnnotation(NotNull.class) != null && !ignoreAdminLogin) {
-                        /**
-                         * 管理员为空，有两种情况
-                         * 1. 可走开放平台
-                         * 2. 不可走开放平台，需要但需验签
-                         */
-                        throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_ADMIN_NOT_LOGIN);
+                    if (args[i] == null && methodParam.getAnnotation(NotNull.class) != null) {
+                        throw new ServiceException(CoreExceptionDefinition.LAUNCHER_ADMIN_NOT_LOGIN);
+                    }
+                } else if (httpParam.type() == HttpParamType.CUSTOM_ACCOUNT_ID) {
+                    Class<?> clazz = httpParam.customAccountClass();
+                    if (clazz == Object.class) {
+                        throw new ServiceException(CoreExceptionDefinition.LAUNCHER_ADMIN_NOT_LOGIN);
+                    }
+                    String simpleName = clazz.getSimpleName();
+                    String header = simpleName.replace("DO", "").replace("DTO", "");
+                    String accessToken = request.getHeader(header.toUpperCase() + "TOKEN");
+                    CustomAccountOwner custom = customAuthenticator.getCustom(clazz, accessToken);
+                    if (custom != null) {
+                        sessionUtil.setCustom(custom);
+                        args[i] = custom.getId();
+                        personId = custom.getId();
+                        MDC.put("account", header.toUpperCase() + "_" + personId);
+                        MDC.put("token", accessToken);
+                    }
+                    if (args[i] == null && methodParam.getAnnotation(NotNull.class) != null) {
+                        throw new ServiceException(CoreExceptionDefinition.LAUNCHER_ADMIN_NOT_LOGIN);
                     }
                 } else if (httpParam.type() == HttpParamType.IP) {
                     //这里根据实际情况来定。 若使用了负载均衡，Ip将会被代理服务器设置到某个Header里面
                     args[i] = ip;
-                    if (StringUtils.isEmpty(args[i]) && methodParam.getAnnotation(NotNull.class) != null && !ignoreAdminLogin) {
-                        throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_GET_IP_FAILED);
-                    }
                 } else if (httpParam.type() == HttpParamType.HEADER) {
+                    Class<?> type = methodParam.getType();
                     String header = request.getHeader(httpParam.name());
-                    args[i] = header;
-                    NotNull annotation = methodParam.getAnnotation(NotNull.class);
-                    if (header == null && annotation != null) {
-                        this.throwParamCheckServiceException(annotation);
+                    if (StringUtils.isNotEmpty(header) && Const.IGNORE_PARAM_LIST.contains(type)) {
+                        Constructor<?> constructor = type.getConstructor(String.class);
+                        args[i] = constructor.newInstance(header);
+                    } else {
+                        args[i] = header;
                     }
                 } else if (httpParam.type() == HttpParamType.FILE) {
                     // 读文件
-                    if (request instanceof MultipartHttpServletRequest) {
-                        MultipartHttpServletRequest multipartHttpServletRequest = (MultipartHttpServletRequest) request;
+                    if (request instanceof MultipartHttpServletRequest multipartHttpServletRequest) {
                         MultipartFile file = multipartHttpServletRequest.getFile(httpParam.name());
-                        NotNull annotation = methodParam.getAnnotation(NotNull.class);
-                        if (file == null && annotation != null) {
-                            this.throwParamCheckServiceException(annotation);
-                        }
                         if (file != null) {
-                            InputStream inputStream = null;
-                            try {
-                                inputStream = file.getInputStream();
+                            try (InputStream inputStream = file.getInputStream()) {
                                 byte[] bytes = StreamUtils.copyToByteArray(inputStream);
                                 args[i] = bytes;
-                            } catch (IOException e) {
-                                throw e;
-                            } finally {
-                                if (inputStream != null)
-                                    inputStream.close();
                             }
                         }
                     } else {
-                        throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_READ_FILE_JUST_SUPPORT_MULTIPART);
+                        throw new ServiceException(CoreExceptionDefinition.LAUNCHER_READ_FILE_JUST_SUPPORT_MULTIPART);
+                    }
+                } else if (httpParam.type() == HttpParamType.FILE_NAME) {
+                    if (request instanceof MultipartHttpServletRequest multipartHttpServletRequest) {
+                        String name = httpParam.name();
+                        MultipartFile file = multipartHttpServletRequest.getFile(httpParam.name().substring(0, name.length() - 4));
+                        if (file != null) {
+                            String originalFilename = file.getOriginalFilename();
+                            args[i] = originalFilename;
+                        }
+                    } else {
+                        throw new ServiceException(CoreExceptionDefinition.LAUNCHER_READ_FILE_JUST_SUPPORT_MULTIPART);
+                    }
+                } else if (httpParam.type() == HttpParamType.EXCEL) {
+                    // 读Excel
+                    if (request instanceof MultipartHttpServletRequest multipartHttpServletRequest) {
+                        MultipartFile file = multipartHttpServletRequest.getFile(httpParam.name());
+                        if (file != null) {
+                            List<?> list = null;
+                            try {
+                                list = ExcelUtils.importExcel(file, httpParam.arrayClass());
+                            } catch (RuntimeException e) {
+                                logger.error("[导入Excel] 异常", e);
+                                throw new ServiceException(e.getMessage());
+                            }
+                            args[i] = list;
+                        }
+                    } else {
+                        throw new ServiceException(CoreExceptionDefinition.LAUNCHER_READ_FILE_JUST_SUPPORT_MULTIPART);
                     }
                 }
-                if (!ignoreAdminLogin && isPrivateApi && httpMethod.openPlatform()) {
-                    throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_OPEN_PLATFORM_CHECK_FAILED);
+                if (args[i] == null) {
+                    NotNull annotation = methodParam.getAnnotation(NotNull.class);
+                    if (args[i] == null && annotation != null) {
+                        this.throwParamCheckServiceException(annotation);
+                    }
                 }
             }
             // 流量限制
             if (!this.rateLimiter.acquire(_gp + "." + _mt, httpMethod, personId, ip)) {
-                throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_SYSTEM_BUSY);
+                throw new ServiceException(CoreExceptionDefinition.LAUNCHER_SYSTEM_BUSY);
             }
             ClassLoader classLoader = serviceBean.getClass().getClassLoader();
             Thread.currentThread().setContextClassLoader(classLoader);
             Object invokeObj = customInvoker.invoke(serviceBean, method, args);
-            ResultType resultType = httpMethod.type();
-            if (!StringUtils.isEmpty(_type) && "raw".equals(_type)) {
-                //如果是不用包装的直接返回
-                return invokeObj;
+            String fileName = httpMethod.exportFileName();
+            if (StringUtils.isNotEmpty(fileName)) {
+                fileName = fileName.replace("${time}", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
+                String encodeFilename = URLEncoder.encode(fileName, StandardCharsets.UTF_8);
+                response.addHeader("Access-Control-Expose-Headers", "Content-Disposition");
+                response.addHeader("Content-Disposition","attachment;filename="+encodeFilename);
             }
-            //下面是需要包装返回的
-            if (resultType == ResultType.COOKIE) {
-                //加入Cookie时处理
-                if (StringUtils.isEmpty(httpMethod.retName())) {
-                    throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_API_NOT_EXISTS);
-                } else {
-                    //setCookie
-                    Cookie cookie = new Cookie(httpMethod.retName(), (String) invokeObj);
-                    cookie.setPath("/");
-                    if (httpMethod.maxAge() != -1) {
-                        cookie.setMaxAge(httpMethod.maxAge());
-                    }
-                    response.addCookie(cookie);
-                }
-            }
-            GatewayResponse gatewayResponse = new GatewayResponse();
+            GatewayResponse<Object> gatewayResponse = new GatewayResponse<>();
             gatewayResponse.setErrno(200);
             gatewayResponse.setErrmsg("成功");
-            gatewayResponse.setTimestamp(invokeTime);
+            gatewayResponse.setContentType(httpMethod.contentType());
             gatewayResponse.setData(invokeObj);
-            return gatewayResponse;
+            return GatewayResponse.success(invokeObj, httpMethod.contentType());
         } catch (ServiceException e) {
+            logger.info("[HTTP] 服务异常栈顶: {}", e.getStackTrace()[0].toString());
             throw e;
         } catch (Exception e) {
             Throwable target = e;
-            String token = request.getHeader(Const.ADMIN_ACCESS_TOKEN);
-            if (StringUtils.isEmpty(token)) {
-                token = request.getHeader(Const.USER_ACCESS_TOKEN);
-            }
-            if (e instanceof InvocationTargetException) {
-                InvocationTargetException proxy = (InvocationTargetException) e;
+            if (e instanceof InvocationTargetException proxy) {
                 Throwable targetException = proxy.getTargetException();
                 target = targetException;
                 if (targetException instanceof ServiceException) {
+                    logger.info("[HTTP] Service Stack Top: {}", targetException.getStackTrace()[0].toString());
                     throw (ServiceException) targetException;
                 }
             }
-            logger.error("[HTTP] requestId={}; token={}, request={}", invokeTime, token, JSONObject.toJSONString(request.getParameterMap()));
+            logger.error("[HTTP] R={}", apiContext.requestLogMap());
             Class<? extends Throwable> clazz = target.getClass();
             OtherExceptionTransfer transfer = otherExceptionTransferHolder.getByClass(clazz);
-            ServiceException afterTransServiceException = transfer.trans(e);
+            ServiceException afterTransServiceException = transfer.trans(target);
             if (afterTransServiceException != null) {
-                logger.error("[网关] 系统未知异常 message=" + afterTransServiceException.getMessage(), e);
+                logger.error("[HTTP] 系统未知异常 message={}", afterTransServiceException.getMessage(), e);
                 throw afterTransServiceException;
             }
-            logger.error("[网关] 系统未知异常", e);
-            throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_UNKNOWN_EXCEPTION);
+            logger.error("[HTTP] 系统未知异常", e);
+            throw new ServiceException(CoreExceptionDefinition.LAUNCHER_UNKNOWN_EXCEPTION);
         }
     }
 
-    /**
-     * 校验细粒度接口参数
-     *
-     * @param type
-     * @param methodParam
-     * @param target
-     * @throws ServiceException
-     */
-    private void checkParam(Class<?> type, Parameter methodParam, String target) throws ServiceException {
-        if (type == String.class) {
-            TextFormat textFormat = methodParam.getAnnotation(TextFormat.class);
-            if (textFormat != null) {
-                String regex = textFormat.regex();
-                if (!StringUtils.isEmpty(regex)) {
-                    //如果正则生效，则直接使用正则校验
-                    if (!target.matches(regex)) {
-                        this.throwParamCheckServiceException(textFormat);
-                    }
-                } else {
-                    boolean notChinese = textFormat.notChinese();
-                    if (notChinese) {
-                        if (target.matches("[\\u4e00-\\u9fa5]+")) {
-                            this.throwParamCheckServiceException(textFormat);
-                        }
-                    }
 
-                    String[] contains = textFormat.contains();
-                    for (int j = 0; j < contains.length; j++) {
-                        if (!target.contains(contains[j])) {
-                            this.throwParamCheckServiceException(textFormat);
-                        }
-                    }
-
-                    String[] notContains = textFormat.notContains();
-                    for (int j = 0; j < notContains.length; j++) {
-                        if (target.contains(notContains[j])) {
-                            this.throwParamCheckServiceException(textFormat);
-                        }
-                    }
-
-                    String startWith = textFormat.startWith();
-                    if (!StringUtils.isEmpty(startWith)) {
-                        if (!target.startsWith(startWith)) {
-                            this.throwParamCheckServiceException(textFormat);
-                        }
-                    }
-
-                    String endsWith = textFormat.endsWith();
-                    if (!StringUtils.isEmpty(target)) {
-                        if (!target.endsWith(endsWith)) {
-                            this.throwParamCheckServiceException(textFormat);
-                        }
-                    }
-                    int targetLength = target.length();
-                    int length = textFormat.length();
-                    if (length != -1) {
-                        if (targetLength != length) {
-                            this.throwParamCheckServiceException(textFormat);
-                        }
-                    }
-
-                    if (targetLength < textFormat.lengthMin()) {
-                        this.throwParamCheckServiceException(textFormat);
-                    }
-
-                    if (targetLength > textFormat.lengthMax()) {
-                        this.throwParamCheckServiceException(textFormat);
-                    }
-                }
-            }
-        } else if (type == Integer.class) {
-            Range range = methodParam.getAnnotation(Range.class);
-            Integer integer = new Integer(target);
-            if (range != null) {
-                if (integer > range.max() || integer < range.min()) {
-                    this.throwParamCheckServiceException(range);
-                }
-            }
-        } else if (type == Long.class) {
-            Range range = methodParam.getAnnotation(Range.class);
-            if (range != null) {
-                Long integer = new Long(target);
-                if (integer > range.max() || integer < range.min()) {
-                    this.throwParamCheckServiceException(range);
-                }
-            }
-        } else if (type == Float.class) {
-            Range range = methodParam.getAnnotation(Range.class);
-            if (range != null) {
-                Float number = new Float(target);
-                if (number > range.max() || number < range.min()) {
-                    this.throwParamCheckServiceException(range);
-                }
-            }
-        } else if (type == Double.class) {
-            Range range = methodParam.getAnnotation(Range.class);
-            if (range != null) {
-                Double number = new Double(target);
-                if (number > range.max() || number < range.min()) {
-                    this.throwParamCheckServiceException(range);
-                }
-            }
-        }
-    }
-
-    /**
-     * 校验粗粒度接口参数，递归校验
-     *
-     * @param object
-     * @throws ServiceException
-     */
-    private void checkParam(Object object) throws ServiceException {
-        try {
-            Class<?> objectClazz = object.getClass();
-            Field[] declaredFields = objectClazz.getDeclaredFields();
-            for (Field field : declaredFields) {
-                field.setAccessible(true);
-                // 1. 非空
-                NotNull notNull = field.getAnnotation(NotNull.class);
-                if (notNull != null && notNull.reqScope() && ObjectUtils.isEmpty(field.get(object))) {
-                    this.throwParamCheckServiceException(notNull);
-                }
-                // 2. 范围
-                Class<?> fieldClazz = field.getType();
-                if (Number.class.isAssignableFrom(fieldClazz)) {
-                    Range range = field.getAnnotation(Range.class);
-                    Object numberObject = field.get(object);
-                    if (numberObject != null) {
-                        if (fieldClazz == Integer.class) {
-                            if (range != null) {
-                                Integer number = new Integer(numberObject.toString());
-                                if (number > range.max() || number < range.min()) {
-                                    this.throwParamCheckServiceException(range);
-                                }
-                            }
-                        } else if (fieldClazz == Long.class) {
-                            if (range != null) {
-                                Long number = new Long(numberObject.toString());
-                                if (number > range.max() || number < range.min()) {
-                                    this.throwParamCheckServiceException(range);
-                                }
-                            }
-                        } else if (fieldClazz == Float.class) {
-                            if (range != null) {
-                                Float number = new Float(numberObject.toString());
-                                if (number > range.max() || number < range.min()) {
-                                    this.throwParamCheckServiceException(range);
-                                }
-                            }
-                        } else if (fieldClazz == Double.class) {
-                            if (range != null) {
-                                Double number = new Double(numberObject.toString());
-                                if (number > range.max() || number < range.min()) {
-                                    this.throwParamCheckServiceException(range);
-                                }
-                            }
-                        }
-                    }
-                }
-                // 3. 递归其他非基本类型
-                if (!Modifier.isStatic(field.getModifiers()) && !Const.IGNORE_PARAM_LIST.contains(fieldClazz)) {
-                    if (Collection.class.isAssignableFrom(fieldClazz)) {
-                        // 3.1. Collection
-                        Collection collection = (Collection) field.get(object);
-                        if (collection != null) {
-                            for (Object obj : collection) {
-                                if (!Const.IGNORE_PARAM_LIST.contains(obj.getClass())) {
-                                    this.checkParam(obj);
-                                }
-                            }
-                        }
-                    } else {
-                        // 3.2. 其他对象
-                        Object obj = field.get(object);
-                        if (obj != null) {
-                            this.checkParam(obj);
-                        }
-                    }
-                }
-            }
-        } catch (IllegalAccessException e) {
-        }
-    }
 
     private void throwParamCheckServiceException(Annotation annotation) throws ServiceException {
         try {
             Method method = annotation.getClass().getMethod("message");
             Object res = method.invoke(annotation);
             if (!ObjectUtils.isEmpty(res)) {
-                throw new LauncherServiceException((String) res, LauncherExceptionDefinition.LAUNCHER_PARAM_CHECK_FAILED.getCode());
+                throw new ServiceException((String) res, CoreExceptionDefinition.LAUNCHER_PARAM_CHECK_FAILED.getCode());
             } else {
-                throw new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_PARAM_CHECK_FAILED);
+                throw new ServiceException(CoreExceptionDefinition.LAUNCHER_PARAM_CHECK_FAILED);
             }
-        } catch (NoSuchMethodException e) {
-        } catch (IllegalAccessException e) {
-        } catch (InvocationTargetException e) {
+        } catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException ignored) {
         }
+    }
+
+    private String buildServiceResult(HttpServletResponse res, long invokeTime, ServiceException e) {
+        GatewayResponse<Object> gatewayResponse = new GatewayResponse<>();
+        gatewayResponse.setTimestamp(invokeTime);
+        gatewayResponse.setErrno(e.getCode());
+        gatewayResponse.setErrmsg(e.getMessage());
+        gatewayResponse.setData(e.getAttach());
+        return afterPost(res, invokeTime, gatewayResponse, true);
     }
 
 }

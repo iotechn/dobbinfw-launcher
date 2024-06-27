@@ -1,5 +1,6 @@
 package com.dobbinsoft.fw.launcher.exception;
 
+import com.dobbinsoft.fw.core.exception.CoreExceptionDefinition;
 import com.dobbinsoft.fw.core.exception.ServiceException;
 import org.springframework.stereotype.Component;
 
@@ -8,11 +9,11 @@ public class DefaultOtherExceptionTransfer implements OtherExceptionTransfer<Exc
 
     @Override
     public ServiceException trans(Exception e) {
-        return new LauncherServiceException(LauncherExceptionDefinition.LAUNCHER_UNKNOWN_EXCEPTION);
+        return new ServiceException(CoreExceptionDefinition.LAUNCHER_UNKNOWN_EXCEPTION);
     }
 
     @Override
-    public Class getExceptionClass() {
+    public Class<?> getExceptionClass() {
         return Exception.class;
     }
 }

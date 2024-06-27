@@ -43,10 +43,7 @@ public class ApiDocumentModel {
         private String name;
         private String description;
         private String retType;
-        /**
-         * 是否是开放平台接口
-         */
-        private Boolean openPlatform;
+        private String permission;
         private List<Field> retObj;
         private List<Parameter> parameters;
         private List<Entity> entityList;
@@ -69,6 +66,9 @@ public class ApiDocumentModel {
          * 是否是JSON对象
          */
         private Boolean json;
+        private String map;
+        private String filter;
+        private BaseEnums[] enums;
 
     }
 
@@ -85,6 +85,7 @@ public class ApiDocumentModel {
 
     @Data
     public static class Field {
+        private Boolean required;
         private String name;
         private String type;
         private String description;

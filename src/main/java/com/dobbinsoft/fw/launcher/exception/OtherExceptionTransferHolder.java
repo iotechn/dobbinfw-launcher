@@ -19,7 +19,6 @@ public class OtherExceptionTransferHolder {
 
     /**
      * 初始值，与缓存
-     * 异常子类，第一次会 O(n) 去遍历Map Value Set
      */
     private Map<Class, OtherExceptionTransfer> otherExceptionHandlerHolderMap;
 

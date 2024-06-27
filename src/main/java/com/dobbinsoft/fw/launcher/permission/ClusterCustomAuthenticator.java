@@ -1,7 +1,7 @@
 package com.dobbinsoft.fw.launcher.permission;
 
 import com.dobbinsoft.fw.core.Const;
-import com.dobbinsoft.fw.core.entiy.inter.IdentityOwner;
+import com.dobbinsoft.fw.core.entiy.inter.CustomAccountOwner;
 import com.dobbinsoft.fw.core.util.ISessionUtil;
 import com.dobbinsoft.fw.support.properties.FwSystemProperties;
 import com.dobbinsoft.fw.support.session.SessionStorage;
@@ -9,11 +9,8 @@ import com.dobbinsoft.fw.support.utils.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-/**
- * 集群系统用户获取方式
- */
 @Component
-public class ClusterUserAuthenticator implements IUserAuthenticator {
+public class ClusterCustomAuthenticator implements ICustomAuthenticator {
 
     @Autowired
     private ISessionUtil sessionUtil;
@@ -25,14 +22,16 @@ public class ClusterUserAuthenticator implements IUserAuthenticator {
     private FwSystemProperties fwSystemProperties;
 
     @Override
-    public IdentityOwner getUser(String accessToken) {
+    public CustomAccountOwner getCustom(Class clazz, String accessToken) {
         if (StringUtils.isEmpty(accessToken)) {
             return null;
         }
-        IdentityOwner identityOwner = sessionStorage.get(Const.USER_REDIS_PREFIX, accessToken, sessionUtil.getUserClass());
+        String simpleName = clazz.getSimpleName();
+        String key = Const.CUSTOM_REDIS_PREFIX + simpleName + ":" + accessToken;
+        CustomAccountOwner identityOwner = (CustomAccountOwner)sessionStorage.get(key, accessToken, clazz);
         if (identityOwner != null) {
-            sessionUtil.setUser(identityOwner);
-            sessionStorage.renew(Const.USER_REDIS_PREFIX, accessToken, fwSystemProperties.getUserSessionPeriod());
+            sessionUtil.setCustom(identityOwner);
+            sessionStorage.renew(key, accessToken, fwSystemProperties.getUserSessionPeriod());
         }
         return identityOwner;
     }

@@ -6,7 +6,7 @@ import com.dobbinsoft.fw.core.exception.ServiceException;
  * 其他异常转换器。
  * 功能：将其他异常，转换为有提示的服务异常
  */
-public interface OtherExceptionTransfer<T extends Exception> {
+public interface OtherExceptionTransfer<T extends Throwable> {
 
     /**
      * 转换主体
@@ -19,6 +19,6 @@ public interface OtherExceptionTransfer<T extends Exception> {
      * 获取异常类
      * @return
      */
-    public Class getExceptionClass();
+    public Class<?> getExceptionClass();
 
 }

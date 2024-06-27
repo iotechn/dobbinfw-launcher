@@ -9,14 +9,13 @@ import java.util.Set;
 
 /**
  * ClassName: IApiManager
- * Description: TODO
- *
- * @author: e-weichaozheng
- * @date: 2021-05-20
+ * Description: API管理器
  */
 public interface IApiManager {
 
-    public Method getMethod(String app, String group, String name);
+    public Method getMethod(String group, String name);
+
+    public Method getRpcMethod(String group, String name);
 
     public Object getServiceBean(Method method);
 

@@ -1,14 +1,11 @@
 package com.dobbinsoft.fw.launcher.inter;
 
 
-import javax.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpServletResponse;
 
 /**
- * ClassName: BeforeHttpMethod
- * Description: TODO
- *
- * @author: e-weichaozheng
- * @date: 2021-03-29
+ * ClassName: AfterHttpMethod
+ * Description: 当调用http结束时可以做的一些事情，例如增加cookie等
  */
 public interface AfterHttpMethod {
 
