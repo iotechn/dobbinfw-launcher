@@ -27,6 +27,7 @@ import com.dobbinsoft.fw.support.properties.FwRpcProviderProperties;
 import com.dobbinsoft.fw.support.rate.RateLimiter;
 import com.dobbinsoft.fw.support.rpc.RpcProviderUtils;
 import com.dobbinsoft.fw.support.utils.*;
+import com.dobbinsoft.fw.support.utils.excel.ExcelBigExportAdapter;
 import com.dobbinsoft.fw.support.utils.excel.ExcelData;
 import com.dobbinsoft.fw.support.utils.excel.ExcelUtils;
 import jakarta.servlet.http.HttpServletRequest;
@@ -161,10 +162,19 @@ public class ApiController {
                 res.setContentType(APPLICATION_XLS_X);
                 // 直接输出文件
                 ExcelData<?> excelData = new ExcelData<>();
-                List data = (List<?>) gatewayResponse.getData();
-                excelData.setData(data);
-                excelData.setFileName(context.httpExcel.fileName() + "-" + new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
-                ExcelUtils.exportExcel(res, excelData, context.httpExcel.clazz());
+                Object respData = gatewayResponse.getData();
+                String fileName = context.httpExcel.fileName() + "-" + new SimpleDateFormat("yyyyMMddHHmmss").format(new Date());
+                if (respData instanceof List<?>) {
+                    List data = (List<?>) respData;
+                    excelData.setData(data);
+                    excelData.setFileName(fileName);
+                    ExcelUtils.exportExcel(res, excelData, context.httpExcel.clazz());
+                } else if (respData instanceof ExcelBigExportAdapter) {
+                    ExcelBigExportAdapter<?> excelBigExportAdapter = (ExcelBigExportAdapter<?>) respData;
+                    ExcelUtils.exportBigExcel(res, excelBigExportAdapter, fileName);
+                } else {
+                    throw new RuntimeException("Http Excel 只能返回List或者ExcelBigExportAdapter");
+                }
                 afterPost(res, invokeTime, obj, false);
                 return;
             } else if (obj instanceof GatewayResponse<?> gatewayResponse) {
