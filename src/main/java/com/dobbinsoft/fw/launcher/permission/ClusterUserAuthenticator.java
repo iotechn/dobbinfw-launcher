@@ -2,6 +2,7 @@ package com.dobbinsoft.fw.launcher.permission;
 
 import com.dobbinsoft.fw.core.Const;
 import com.dobbinsoft.fw.core.entiy.inter.IdentityOwner;
+import com.dobbinsoft.fw.core.exception.ServiceException;
 import com.dobbinsoft.fw.core.util.ISessionUtil;
 import com.dobbinsoft.fw.support.properties.FwSystemProperties;
 import com.dobbinsoft.fw.support.session.SessionStorage;
@@ -25,7 +26,7 @@ public class ClusterUserAuthenticator implements IUserAuthenticator {
     private FwSystemProperties fwSystemProperties;
 
     @Override
-    public IdentityOwner getUser(String accessToken) {
+    public IdentityOwner getUser(String accessToken) throws ServiceException {
         if (StringUtils.isEmpty(accessToken)) {
             return null;
         }

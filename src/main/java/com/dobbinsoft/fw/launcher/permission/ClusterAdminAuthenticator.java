@@ -2,6 +2,7 @@ package com.dobbinsoft.fw.launcher.permission;
 
 import com.dobbinsoft.fw.core.Const;
 import com.dobbinsoft.fw.core.entiy.inter.PermissionOwner;
+import com.dobbinsoft.fw.core.exception.ServiceException;
 import com.dobbinsoft.fw.core.util.ISessionUtil;
 import com.dobbinsoft.fw.support.properties.FwSystemProperties;
 import com.dobbinsoft.fw.support.session.SessionStorage;
@@ -22,7 +23,7 @@ public class ClusterAdminAuthenticator implements IAdminAuthenticator {
     private FwSystemProperties fwSystemProperties;
 
     @Override
-    public PermissionOwner getAdmin(String accessToken) {
+    public PermissionOwner getAdmin(String accessToken) throws ServiceException {
         if (StringUtils.isEmpty(accessToken)) {
             return null;
         }

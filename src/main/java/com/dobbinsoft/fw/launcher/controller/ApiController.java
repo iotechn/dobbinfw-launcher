@@ -132,6 +132,8 @@ public class ApiController {
                 throw new ServiceException(CoreExceptionDefinition.LAUNCHER_RPC_SIGN_INCORRECT);
             }
         } catch (ServiceException e) {
+            // 异常
+            res.setContentType(MediaType.APPLICATION_JSON_VALUE);
             try (OutputStream os = res.getOutputStream()) {
                 byte[] result = buildServiceResult(res, System.currentTimeMillis(), e).getBytes(StandardCharsets.UTF_8);
                 os.write(result);
@@ -169,13 +171,12 @@ public class ApiController {
                     excelData.setData(data);
                     excelData.setFileName(fileName);
                     ExcelUtils.exportExcel(res, excelData, context.httpExcel.clazz());
-                } else if (respData instanceof ExcelBigExportAdapter) {
-                    ExcelBigExportAdapter<?> excelBigExportAdapter = (ExcelBigExportAdapter<?>) respData;
+                } else if (respData instanceof ExcelBigExportAdapter<?> excelBigExportAdapter) {
                     ExcelUtils.exportBigExcel(res, excelBigExportAdapter, fileName);
                 } else {
                     throw new RuntimeException("Http Excel 只能返回List或者ExcelBigExportAdapter");
                 }
-                afterPost(res, invokeTime, obj, false);
+                afterPost(res, invokeTime, obj, false, context.httpMethod.noLog());
                 return;
             } else if (obj instanceof GatewayResponse<?> gatewayResponse) {
                 gatewayResponse.setTimestamp(invokeTime);
@@ -187,13 +188,13 @@ public class ApiController {
                 Object data = gatewayResponse.getData();
                 if (data instanceof byte[]) {
                     result = (byte[]) data;
-                    afterPost(res, invokeTime, obj, false);
+                    afterPost(res, invokeTime, obj, false, context.httpMethod.noLog());
                 } else {
-                    result = afterPost(res, invokeTime, obj, true).getBytes(StandardCharsets.UTF_8);
+                    result = afterPost(res, invokeTime, obj, true, context.httpMethod.noLog()).getBytes(StandardCharsets.UTF_8);
                 }
             } else {
                 res.setContentType(MediaType.APPLICATION_JSON_VALUE);
-                result = afterPost(res, invokeTime, obj, true).getBytes(StandardCharsets.UTF_8);
+                result = afterPost(res, invokeTime, obj, true, context.httpMethod.noLog()).getBytes(StandardCharsets.UTF_8);
             }
         } catch (ServiceException e) {
             res.setContentType(MediaType.APPLICATION_JSON_VALUE);
@@ -214,12 +215,18 @@ public class ApiController {
      * @param obj 调用结果
      * @return
      */
-    private String afterPost(HttpServletResponse res, long invokeTime, Object obj, boolean json) {
+    private String afterPost(HttpServletResponse res, long invokeTime, Object obj, boolean json, boolean noLog) {
         long during = System.currentTimeMillis() - invokeTime;
         String result = "";
         if (json) {
             result = JacksonUtil.toJSONString(obj);
-            logger.info("[HTTP] R={}; D={}ms", JacksonUtil.toJSONString(result), during);
+            if (noLog) {
+                logger.info("[HTTP] R=NoLog, D={}ms", during);
+            } else {
+                logger.info("[HTTP] R={}; D={}ms", JacksonUtil.toJSONString(result), during);
+            }
+        } else {
+            logger.info("[HTTP] R=NoLog, D={}ms", during);
         }
         if (afterHttpMethod != null) {
             afterHttpMethod.after(res, result);
@@ -374,7 +381,14 @@ public class ApiController {
                             try {
                                 args[i] = constructor.newInstance(value);
                             } catch (NumberFormatException e) {
+                                logger.warn("[HTTP] 客户端数字解析失败 value={}", value);
                                 throw new ServiceException(CoreExceptionDefinition.LAUNCHER_NUMBER_PARSE_ERROR);
+                            } catch (InvocationTargetException e) {
+                                Throwable targetException = e.getTargetException();
+                                if (targetException instanceof NumberFormatException) {
+                                    logger.warn("[HTTP] 客户端数字解析失败 value={}", value);
+                                    throw new ServiceException(CoreExceptionDefinition.LAUNCHER_NUMBER_PARSE_ERROR);
+                                }
                             }
                         } else if (type == List.class) {
                             args[i] = JacksonUtil.parseArray(value, httpParam.arrayClass());
@@ -576,7 +590,7 @@ public class ApiController {
         gatewayResponse.setErrno(e.getCode());
         gatewayResponse.setErrmsg(e.getMessage());
         gatewayResponse.setData(e.getAttach());
-        return afterPost(res, invokeTime, gatewayResponse, true);
+        return afterPost(res, invokeTime, gatewayResponse, true, false);
     }
 
 }

@@ -2,6 +2,7 @@ package com.dobbinsoft.fw.launcher.permission;
 
 import com.dobbinsoft.fw.core.Const;
 import com.dobbinsoft.fw.core.entiy.inter.CustomAccountOwner;
+import com.dobbinsoft.fw.core.exception.ServiceException;
 import com.dobbinsoft.fw.core.util.ISessionUtil;
 import com.dobbinsoft.fw.support.properties.FwSystemProperties;
 import com.dobbinsoft.fw.support.session.SessionStorage;
@@ -22,12 +23,12 @@ public class ClusterCustomAuthenticator implements ICustomAuthenticator {
     private FwSystemProperties fwSystemProperties;
 
     @Override
-    public CustomAccountOwner getCustom(Class clazz, String accessToken) {
+    public CustomAccountOwner getCustom(Class clazz, String accessToken) throws ServiceException {
         if (StringUtils.isEmpty(accessToken)) {
             return null;
         }
         String simpleName = clazz.getSimpleName();
-        String key = Const.CUSTOM_REDIS_PREFIX + simpleName + ":" + accessToken;
+        String key = Const.CUSTOM_REDIS_PREFIX + simpleName;
         CustomAccountOwner identityOwner = (CustomAccountOwner)sessionStorage.get(key, accessToken, clazz);
         if (identityOwner != null) {
             sessionUtil.setCustom(identityOwner);
