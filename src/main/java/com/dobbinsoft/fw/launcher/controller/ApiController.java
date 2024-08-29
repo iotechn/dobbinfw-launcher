@@ -25,11 +25,13 @@ import com.dobbinsoft.fw.launcher.permission.ICustomAuthenticator;
 import com.dobbinsoft.fw.launcher.permission.IUserAuthenticator;
 import com.dobbinsoft.fw.support.properties.FwRpcProviderProperties;
 import com.dobbinsoft.fw.support.rate.RateLimiter;
+import com.dobbinsoft.fw.support.rpc.RpcContextHolder;
 import com.dobbinsoft.fw.support.rpc.RpcProviderUtils;
 import com.dobbinsoft.fw.support.utils.*;
 import com.dobbinsoft.fw.support.utils.excel.ExcelBigExportAdapter;
 import com.dobbinsoft.fw.support.utils.excel.ExcelData;
 import com.dobbinsoft.fw.support.utils.excel.ExcelUtils;
+import com.fasterxml.jackson.core.type.TypeReference;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
@@ -130,6 +132,12 @@ public class ApiController {
             JwtUtils.JwtResult jwtResult = rpcProviderUtils.validToken(systemId, jwtToken);
             if (jwtResult.getResult() != JwtUtils.Result.SUCCESS) {
                 throw new ServiceException(CoreExceptionDefinition.LAUNCHER_RPC_SIGN_INCORRECT);
+            }
+            String rpcContextJson = req.getHeader(Const.RPC_CONTEXT_JSON);
+            if (StringUtils.isNotEmpty(rpcContextJson)) {
+                Map<String, String> rpcContexts = JacksonUtil.parseObject(rpcContextJson, new TypeReference<Map<String, String>>() {
+                });
+                rpcContexts.forEach(RpcContextHolder::add);
             }
         } catch (ServiceException e) {
             // 异常
