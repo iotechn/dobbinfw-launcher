@@ -37,6 +37,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
+import org.slf4j.event.Level;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
 import org.springframework.http.MediaType;
@@ -401,7 +402,11 @@ public class ApiController {
                         } else if (type == List.class) {
                             args[i] = JacksonUtil.parseArray(value, httpParam.arrayClass());
                         } else if (type == LocalDateTime.class) {
-                            args[i] = TimeUtils.stringToLocalDateTime(value);
+                            if (StringUtils.isNumeric(value)) {
+                                args[i] = TimeUtils.timestampToLocalDate(Long.parseLong(value));
+                            } else {
+                                args[i] = TimeUtils.stringToLocalDateTime(value);
+                            }
                         } else if (type == LocalDate.class) {
                             args[i] = TimeUtils.stringToLocalDate(value);
                         } else if (type == LocalTime.class) {
@@ -552,7 +557,11 @@ public class ApiController {
             gatewayResponse.setData(invokeObj);
             return GatewayResponse.success(invokeObj, httpMethod.contentType());
         } catch (ServiceException e) {
-            logger.info("[HTTP] 服务异常栈顶: {}", e.getStackTrace()[0].toString());
+            if (e.getLogLevel() != null && e.getLogLevel() == Level.ERROR) {
+                logger.error("[HTTP] Service exception stack top: {}", e.getStackTrace()[0].toString());
+            } else {
+                logger.info("[HTTP] Service exception stack top: {}", e.getStackTrace()[0].toString());
+            }
             throw e;
         } catch (Exception e) {
             Throwable target = e;
