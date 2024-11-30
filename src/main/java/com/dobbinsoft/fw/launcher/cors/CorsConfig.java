@@ -11,7 +11,7 @@ import org.springframework.web.filter.CorsFilter;
  * springboot解决跨域问题
  */
 @Configuration
-@Profile(value = {"dev", "test", "default"})
+@Profile(value = {"dev", "test", "local", "qa", "default"})
 public class CorsConfig {
 
     private CorsConfiguration buildConfig() {

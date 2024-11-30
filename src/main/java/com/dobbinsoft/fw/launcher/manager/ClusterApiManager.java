@@ -1,6 +1,7 @@
 package com.dobbinsoft.fw.launcher.manager;
 
 import com.dobbinsoft.fw.core.annotation.*;
+import com.dobbinsoft.fw.core.annotation.doc.ApiEntity;
 import com.dobbinsoft.fw.core.annotation.doc.ApiField;
 import com.dobbinsoft.fw.core.annotation.doc.ApiLog;
 import com.dobbinsoft.fw.core.annotation.param.NotNull;
@@ -434,6 +435,12 @@ public class ClusterApiManager implements InitializingBean, ApplicationContextAw
                 Schema<?> dataSchema = gatewayResponseSchema.getProperties().get("data");
                 responseMediaType.setSchema(gatewayResponseSchema);
                 packOpenApiType(returnType, dataSchema);
+                ApiEntity apiEntity = returnType.getAnnotation(ApiEntity.class);
+                if (apiEntity != null) {
+                    dataSchema.setDescription(returnType.getSimpleName() + "," + apiEntity.description());
+                } else {
+                    dataSchema.setDescription(returnType.getSimpleName());
+                }
                 if ("object".equals(dataSchema.getType())) {
                     Type genericReturnType = method.getGenericReturnType();
                     Schema<?> entitySchema = this.generateEntitySchema(returnType, new Stack<>(), genericReturnType instanceof ParameterizedType
