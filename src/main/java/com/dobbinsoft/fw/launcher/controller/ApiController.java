@@ -23,10 +23,12 @@ import com.dobbinsoft.fw.launcher.manager.IApiManager;
 import com.dobbinsoft.fw.launcher.permission.IAdminAuthenticator;
 import com.dobbinsoft.fw.launcher.permission.ICustomAuthenticator;
 import com.dobbinsoft.fw.launcher.permission.IUserAuthenticator;
+import com.dobbinsoft.fw.support.model.SseEmitterWrapper;
 import com.dobbinsoft.fw.support.properties.FwRpcProviderProperties;
 import com.dobbinsoft.fw.support.rate.RateLimiter;
 import com.dobbinsoft.fw.support.rpc.RpcContextHolder;
 import com.dobbinsoft.fw.support.rpc.RpcProviderUtils;
+import com.dobbinsoft.fw.support.sse.SSEPublisher;
 import com.dobbinsoft.fw.support.utils.*;
 import com.dobbinsoft.fw.support.utils.excel.ExcelBigExportAdapter;
 import com.dobbinsoft.fw.support.utils.excel.ExcelData;
@@ -49,6 +51,7 @@ import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.multipart.MultipartHttpServletRequest;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -115,6 +118,9 @@ public class ApiController {
     @Autowired(required = false)
     private RpcProviderUtils rpcProviderUtils;
 
+    @Autowired
+    private SSEPublisher ssePublisher;
+
     private static final String APPLICATION_XLS_X = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
     @RequestMapping(value = {"/rpc", "/rpc/{_gp}/{_mt}"}, method = {RequestMethod.POST, RequestMethod.GET})
@@ -152,6 +158,32 @@ public class ApiController {
         commonsInvoke(req, res, _gp, _mt, ApiEntry.RPC);
     }
 
+    @RequestMapping(value = {"/sse.api", "/sse.api/{_gp}/{_mt}"}, method = {RequestMethod.POST, RequestMethod.GET})
+    public SseEmitter sseInvoke(
+            HttpServletRequest req,
+            HttpServletResponse res,
+            @PathVariable(required = false) String _gp,
+            @PathVariable(required = false) String _mt) throws IOException {
+        long invokeTime = System.currentTimeMillis();
+        try {
+            ApiContext context = this.findContext(req, _gp, _mt, ApiEntry.SSE);
+            SseEmitterWrapper wrapper = (SseEmitterWrapper) process(req, res, context);
+            ssePublisher.join(wrapper.getIdentityOwnerKey(), wrapper.getSseEmitter());
+            logger.info("[HTTP] R=SSE 建立, IdentityOwnerKey={}", wrapper.getIdentityOwnerKey());
+            return wrapper.getSseEmitter();
+        } catch (ServiceException e) {
+            res.setContentType(MediaType.APPLICATION_JSON_VALUE);
+            byte[] result = buildServiceResult(res, invokeTime, e).getBytes(StandardCharsets.UTF_8);
+            try (OutputStream os = res.getOutputStream()) {
+                os.write(result);
+            }
+            return null;
+        } finally {
+            MDC.clear();
+            sessionUtil.clear();
+        }
+    }
+
     @RequestMapping(value = {"/m.api", "/m.api/{_gp}/{_mt}"}, method = {RequestMethod.POST, RequestMethod.GET})
     public void invoke(
             HttpServletRequest req,
@@ -166,6 +198,10 @@ public class ApiController {
         long invokeTime = System.currentTimeMillis();
         try {
             ApiContext context = this.findContext(req, _gp, _mt, apiEntry);
+            Method method = context.method;
+            if (method.getReturnType() == SseEmitterWrapper.class && apiEntry != ApiEntry.SSE) {
+                throw new ServiceException(CoreExceptionDefinition.LAUNCHER_ONLY_SSE_SUPPORT);
+            }
             Object obj = process(req, res, context);
             if (Const.IGNORE_PARAM_LIST.contains(obj.getClass())) {
                 result = obj.toString().getBytes(StandardCharsets.UTF_8);
@@ -301,7 +337,7 @@ public class ApiController {
                 throw new ServiceException(CoreExceptionDefinition.LAUNCHER_API_NOT_EXISTS);
             }
         }
-        apiContext.method = apiEntry == ApiEntry.WEB ? apiManager.getMethod(apiContext._gp, apiContext._mt) : apiManager.getRpcMethod(apiContext._gp, apiContext._mt);
+        apiContext.method = apiEntry == ApiEntry.RPC ? apiManager.getRpcMethod(apiContext._gp, apiContext._mt) : apiManager.getMethod(apiContext._gp, apiContext._mt);
         if (apiContext.method == null) {
             throw new ServiceException(CoreExceptionDefinition.LAUNCHER_API_NOT_EXISTS);
         }
@@ -543,6 +579,10 @@ public class ApiController {
             ClassLoader classLoader = serviceBean.getClass().getClassLoader();
             Thread.currentThread().setContextClassLoader(classLoader);
             Object invokeObj = customInvoker.invoke(serviceBean, method, args);
+            if (invokeObj instanceof SseEmitter) {
+                // 直接返回
+                return invokeObj;
+            }
             String fileName = httpMethod.exportFileName();
             if (StringUtils.isNotEmpty(fileName)) {
                 fileName = fileName.replace("${time}", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));

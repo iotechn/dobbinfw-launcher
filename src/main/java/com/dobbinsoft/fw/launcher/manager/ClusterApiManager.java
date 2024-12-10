@@ -13,7 +13,6 @@ import com.dobbinsoft.fw.core.model.GatewayResponse;
 import com.dobbinsoft.fw.launcher.inter.AfterRegisterApiComplete;
 import com.dobbinsoft.fw.support.model.PermissionPoint;
 import com.dobbinsoft.fw.support.utils.StringUtils;
-import com.dobbinsoft.fw.support.utils.excel.ExcelColumn;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.Operation;
 import io.swagger.v3.oas.models.PathItem;
@@ -37,6 +36,7 @@ import org.springframework.context.ApplicationContextAware;
 import org.springframework.stereotype.Component;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.lang.reflect.*;
 import java.math.BigDecimal;
@@ -157,6 +157,7 @@ public class ClusterApiManager implements InitializingBean, ApplicationContextAw
                     String key = method.getName();
                     Method methodQuery = tempMap.get(key);
                     if (methodQuery != null) {
+                        logger.error("[注册OpenApi] Http Api不支持重载");
                         throw new ServiceException(CoreExceptionDefinition.LAUNCHER_API_REGISTER_FAILED);
                     }
                     tempMap.put(key, method);
@@ -420,6 +421,7 @@ public class ClusterApiManager implements InitializingBean, ApplicationContextAw
                 }
 
                 // 返回值
+                Class<?> returnType = method.getReturnType();
                 postOperation.setResponses(new ApiResponses());
                 ApiResponse apiResponse = new ApiResponse();
                 postOperation.getResponses().put("200", apiResponse);
@@ -427,47 +429,58 @@ public class ClusterApiManager implements InitializingBean, ApplicationContextAw
                 apiResponse.setContent(new Content());
                 Content responseContent = apiResponse.getContent();
                 MediaType responseMediaType = new MediaType();
-                responseContent.put(org.springframework.http.MediaType.APPLICATION_JSON_VALUE, responseMediaType);
-                // GatewayResponse 对应文档
-                Class<?> returnType = method.getReturnType();
-                Schema<?> gatewayResponseSchema = generateEntitySchema(GatewayResponse.class, new Stack<>(), method.getGenericReturnType());
-                // Data对应文档
-                Schema<?> dataSchema = gatewayResponseSchema.getProperties().get("data");
-                responseMediaType.setSchema(gatewayResponseSchema);
-                packOpenApiType(returnType, dataSchema);
-                ApiEntity apiEntity = returnType.getAnnotation(ApiEntity.class);
-                if (apiEntity != null) {
-                    dataSchema.setDescription(returnType.getSimpleName() + "," + apiEntity.description());
+                Schema<?> responseSchema;
+                if (returnType == SseEmitter.class) {
+                    responseContent.put(org.springframework.http.MediaType.TEXT_EVENT_STREAM_VALUE, responseMediaType);
+                    responseSchema = new Schema<>();
+                    responseSchema.setType("object");
+                    responseSchema.setProperties(new HashMap<>());
+                    responseMediaType.setSchema(responseSchema);
+                    paths.put("/sse.api/" + gpKey + "/" + methodNameKey, pathItem);
                 } else {
-                    dataSchema.setDescription(returnType.getSimpleName());
-                }
-                if ("object".equals(dataSchema.getType())) {
-                    Type genericReturnType = method.getGenericReturnType();
-                    Schema<?> entitySchema = this.generateEntitySchema(returnType, new Stack<>(), genericReturnType instanceof ParameterizedType
-                            ? ((ParameterizedType) genericReturnType).getActualTypeArguments() : new Type[0]);
-                    gatewayResponseSchema.getProperties().put("data", entitySchema);
-                } else if ("array".equals(dataSchema.getType())) {
-                    // 如果是数组，则需要进一步递归
-                    Type genericType = method.getGenericReturnType();
-                    if (genericType instanceof ParameterizedType) {
-                        // 如果加了泛型
-                        Type[] actualTypeArgument = ((ParameterizedType) genericType).getActualTypeArguments();
-                        Type type = actualTypeArgument[0];
-                        if (type instanceof Class<?>) {
-                            // 直接传入的类型
-                            Schema<?> itemSchema = generateEntitySchema((Class<?>) actualTypeArgument[0], new Stack<>(), actualTypeArgument);
-                            dataSchema.setItems(itemSchema);
+                    responseContent.put(org.springframework.http.MediaType.APPLICATION_JSON_VALUE, responseMediaType);
+                    // GatewayResponse 对应文档
+                    responseSchema = generateEntitySchema(GatewayResponse.class, new Stack<>(), method.getGenericReturnType());
+                    // Data对应文档
+                    Schema<?> dataSchema = responseSchema.getProperties().get("data");
+                    responseMediaType.setSchema(responseSchema);
+                    packOpenApiType(returnType, dataSchema);
+                    ApiEntity apiEntity = returnType.getAnnotation(ApiEntity.class);
+                    if (apiEntity != null) {
+                        dataSchema.setDescription(returnType.getSimpleName() + "," + apiEntity.description());
+                    } else {
+                        dataSchema.setDescription(returnType.getSimpleName());
+                    }
+                    if ("object".equals(dataSchema.getType())) {
+                        Type genericReturnType = method.getGenericReturnType();
+                        Schema<?> entitySchema = this.generateEntitySchema(returnType, new Stack<>(), genericReturnType instanceof ParameterizedType
+                                ? ((ParameterizedType) genericReturnType).getActualTypeArguments() : new Type[0]);
+                        responseSchema.getProperties().put("data", entitySchema);
+                    } else if ("array".equals(dataSchema.getType())) {
+                        // 如果是数组，则需要进一步递归
+                        Type genericType = method.getGenericReturnType();
+                        if (genericType instanceof ParameterizedType) {
+                            // 如果加了泛型
+                            Type[] actualTypeArgument = ((ParameterizedType) genericType).getActualTypeArguments();
+                            Type type = actualTypeArgument[0];
+                            if (type instanceof Class<?>) {
+                                // 直接传入的类型
+                                Schema<?> itemSchema = generateEntitySchema((Class<?>) actualTypeArgument[0], new Stack<>(), actualTypeArgument);
+                                dataSchema.setItems(itemSchema);
+                            }
+                        }
+                        if (dataSchema.getItems() == null) {
+                            // 没加泛型
+                            dataSchema.setItems(new Schema<>());
                         }
                     }
-                    if (dataSchema.getItems() == null) {
-                        // 没加泛型
-                        dataSchema.setItems(new Schema<>());
-                    }
+                    paths.put("/m.api/" + gpKey + "/" + methodNameKey, pathItem);
                 }
-
-
-                paths.put("/m.api/" + gpKey + "/" + methodNameKey, pathItem);
-
+                // 添加示例返回值
+                if (httpMethod.examples().length > 0) {
+                    List list = Arrays.asList(httpMethod.examples());
+                    responseSchema.setExamples(list);
+                }
             }
         }
 
