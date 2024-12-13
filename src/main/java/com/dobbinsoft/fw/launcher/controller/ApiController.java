@@ -24,7 +24,6 @@ import com.dobbinsoft.fw.launcher.permission.IAdminAuthenticator;
 import com.dobbinsoft.fw.launcher.permission.ICustomAuthenticator;
 import com.dobbinsoft.fw.launcher.permission.IUserAuthenticator;
 import com.dobbinsoft.fw.support.model.SseEmitterWrapper;
-import com.dobbinsoft.fw.support.properties.FwRpcProviderProperties;
 import com.dobbinsoft.fw.support.rate.RateLimiter;
 import com.dobbinsoft.fw.support.rpc.RpcContextHolder;
 import com.dobbinsoft.fw.support.rpc.RpcProviderUtils;
@@ -579,7 +578,7 @@ public class ApiController {
             ClassLoader classLoader = serviceBean.getClass().getClassLoader();
             Thread.currentThread().setContextClassLoader(classLoader);
             Object invokeObj = customInvoker.invoke(serviceBean, method, args);
-            if (invokeObj instanceof SseEmitter) {
+            if (invokeObj instanceof SseEmitterWrapper) {
                 // 直接返回
                 return invokeObj;
             }
