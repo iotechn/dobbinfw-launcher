@@ -117,7 +117,7 @@ public class ApiController {
     @Autowired(required = false)
     private RpcProviderUtils rpcProviderUtils;
 
-    @Autowired
+    @Autowired(required = false)
     private SSEPublisher ssePublisher;
 
     private static final String APPLICATION_XLS_X = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -165,6 +165,9 @@ public class ApiController {
             @PathVariable(required = false) String _mt) throws IOException {
         long invokeTime = System.currentTimeMillis();
         try {
+            if (ssePublisher == null) {
+                throw new ServiceException(CoreExceptionDefinition.LAUNCHER_NOT_SUPPORT);
+            }
             ApiContext context = this.findContext(req, _gp, _mt, ApiEntry.SSE);
             SseEmitterWrapper wrapper = (SseEmitterWrapper) process(req, res, context);
             ssePublisher.join(wrapper.getIdentityOwnerKey(), wrapper.getSseEmitter());
