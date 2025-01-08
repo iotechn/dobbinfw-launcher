@@ -4,6 +4,7 @@ public enum ApiEntry {
 
     RPC,
     WEB,
-    SSE
+    SSE,
+    WS
 
 }

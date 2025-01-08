@@ -23,7 +23,10 @@ import com.dobbinsoft.fw.launcher.manager.IApiManager;
 import com.dobbinsoft.fw.launcher.permission.IAdminAuthenticator;
 import com.dobbinsoft.fw.launcher.permission.ICustomAuthenticator;
 import com.dobbinsoft.fw.launcher.permission.IUserAuthenticator;
+import com.dobbinsoft.fw.launcher.ws.DefaultHandshakeInterceptor;
+import com.dobbinsoft.fw.launcher.ws.DefaultWebSocketHandler;
 import com.dobbinsoft.fw.support.model.SseEmitterWrapper;
+import com.dobbinsoft.fw.support.model.WsWrapper;
 import com.dobbinsoft.fw.support.rate.RateLimiter;
 import com.dobbinsoft.fw.support.rpc.RpcContextHolder;
 import com.dobbinsoft.fw.support.rpc.RpcProviderUtils;
@@ -32,7 +35,10 @@ import com.dobbinsoft.fw.support.utils.*;
 import com.dobbinsoft.fw.support.utils.excel.ExcelBigExportAdapter;
 import com.dobbinsoft.fw.support.utils.excel.ExcelData;
 import com.dobbinsoft.fw.support.utils.excel.ExcelUtils;
+import com.dobbinsoft.fw.support.ws.WsPublisher;
+import com.dobbinsoft.fw.support.ws.event.WsEventReceiver;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
@@ -40,8 +46,13 @@ import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.slf4j.event.Level;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.web.ServerProperties;
 import org.springframework.context.ApplicationContext;
 import org.springframework.http.MediaType;
+import org.springframework.http.server.ServerHttpRequest;
+import org.springframework.http.server.ServerHttpResponse;
+import org.springframework.http.server.ServletServerHttpRequest;
+import org.springframework.http.server.ServletServerHttpResponse;
 import org.springframework.util.ObjectUtils;
 import org.springframework.util.StreamUtils;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -51,6 +62,14 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.multipart.MultipartHttpServletRequest;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import org.springframework.web.socket.CloseStatus;
+import org.springframework.web.socket.WebSocketHandler;
+import org.springframework.web.socket.WebSocketMessage;
+import org.springframework.web.socket.WebSocketSession;
+import org.springframework.web.socket.config.annotation.EnableWebSocket;
+import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
+import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry;
+import org.springframework.web.socket.server.HandshakeInterceptor;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -71,13 +90,16 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * API Controller，RPC/WEB 调用流量入口。统一的方法路由，参数校验等逻辑。
  */
 @RestController
 @RequestMapping("/")
-public class ApiController {
+@EnableWebSocket
+public class ApiController implements WebSocketConfigurer, DefaultHandshakeInterceptor, DefaultWebSocketHandler {
 
     private static final Logger logger = LoggerFactory.getLogger(ApiController.class);
 
@@ -114,14 +136,138 @@ public class ApiController {
     @Autowired
     private OtherExceptionTransferHolder otherExceptionTransferHolder;
 
+    @Autowired
+    private ServerProperties serverProperties;
+
     @Autowired(required = false)
     private RpcProviderUtils rpcProviderUtils;
 
     @Autowired(required = false)
     private SSEPublisher ssePublisher;
 
+    @Autowired(required = false)
+    private WsPublisher wsPublisher;
+
+    @Autowired(required = false)
+    private WsEventReceiver wsEventReceiver;
+
     private static final String APPLICATION_XLS_X = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
+    private static final String WS_CURRENT_IDENTITY_OWNER_KEY = "WS_CURRENT_IDENTITY_OWNER_KEY";
+
+    private static final Pattern URI_PATTERN = Pattern.compile("/ws\\.api/([^/]+)/([^/]+)");
+
+    @Override
+    public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
+        if (wsPublisher != null) {
+            registry.addHandler(this, "/ws.api", "/ws.api/{_gp}/{_mt}")
+                    .setAllowedOrigins("*")
+                    .addInterceptors(this);  // 添加拦截器进行认证
+        }
+    }
+
+    @Override
+    public void afterConnectionEstablished(WebSocketSession session) throws Exception {
+        Object o = session.getAttributes().get(WS_CURRENT_IDENTITY_OWNER_KEY);
+        logger.info("[WS] New Session created, session id: {}", session.getId());
+        String identityOwnerKey = o.toString();
+        wsPublisher.join(identityOwnerKey, session);
+    }
+
+    @Override
+    public void afterConnectionClosed(WebSocketSession session, CloseStatus closeStatus) throws Exception {
+        Object o = session.getAttributes().get(WS_CURRENT_IDENTITY_OWNER_KEY);
+        logger.info("[WS] Session closed, session id: {}", session.getId());
+        String identityOwnerKey = o.toString();
+        wsPublisher.quit(identityOwnerKey);
+    }
+
+    @Override
+    public void handleMessage(WebSocketSession session, WebSocketMessage<?> message) throws Exception {
+        Object payload = message.getPayload();
+        if (payload instanceof String) {
+            String event = payload.toString();
+            JsonNode jsonNode = JacksonUtil.parseObject(event);
+            JsonNode eventTypeObj = jsonNode.get("eventType");
+            if (eventTypeObj == null) {
+                logger.info("[WS] Event 报文格式不正确 event: {}", event);
+            } else {
+                String eventType = eventTypeObj.asText();
+                wsEventReceiver.route(eventType, event);
+            }
+        } else {
+            logger.info("[WS] Session 仅支持text报文, session id: {}", session.getId());
+        }
+    }
+
+    @Override
+    public boolean beforeHandshake(ServerHttpRequest request, ServerHttpResponse response, WebSocketHandler wsHandler, Map<String, Object> attributes) throws Exception {
+        if (wsPublisher == null) {
+            logger.info("[WS] 请使用@EnableWs主机 激活Websocket功能");
+            return false;
+        }
+        long invokeTime = System.currentTimeMillis();
+        HttpServletRequest req;
+        if (request instanceof ServletServerHttpRequest) {
+            req = ((ServletServerHttpRequest) request).getServletRequest();
+        } else {
+            logger.warn("[WS] 目前仅支持Http握手");
+            return false;
+        }
+        HttpServletResponse res;
+        if (response instanceof ServletServerHttpResponse) {
+            res = ((ServletServerHttpResponse) response).getServletResponse();
+        } else {
+            logger.warn("[WS] 目前仅支持Http握手");
+            return false;
+        }
+
+        String requestURI = req.getRequestURI();
+        if (serverProperties.getServlet() != null &&
+                StringUtils.isNotEmpty(serverProperties.getServlet().getContextPath())) {
+            requestURI = requestURI.substring(serverProperties.getServlet().getContextPath().length());
+        }
+        // 解析路径参数
+        Matcher matcher = URI_PATTERN.matcher(requestURI);
+        String _gp = null;
+        String _mt = null;
+        if (matcher.matches()) {
+            // 提取路径参数
+            _gp = matcher.group(1); // 第一个路径参数
+            _mt = matcher.group(2); // 第二个路径参数
+        }
+        ApiContext context = findContext(req, _gp, _mt, ApiEntry.WS);
+        try {
+            Object obj = process(req, res, context);
+            if (obj instanceof WsWrapper) {
+                // 鉴权 & 握手完成， 后续进入afterConnectionEstablished方法
+                attributes.put(WS_CURRENT_IDENTITY_OWNER_KEY, ((WsWrapper) obj).getIdentityOwnerKey());
+                return true;
+            }
+            logger.error("[WS] 方法返回对象并非 WsWrapper");
+            return false;
+        } catch (ServiceException e) {
+            res.setContentType(MediaType.APPLICATION_JSON_VALUE);
+            byte[] result = buildServiceResult(res, invokeTime, e).getBytes(StandardCharsets.UTF_8);
+            try (OutputStream os = res.getOutputStream()) {
+                os.write(result);
+            }
+        } finally {
+            MDC.clear();
+            sessionUtil.clear();
+        }
+        return false;
+    }
+
+
+    /**
+     * 远程调用时 接口地址， 通常nginx配置时不暴露
+     * @param req
+     * @param res
+     * @param _gp
+     * @param _mt
+     * @throws IOException
+     */
     @RequestMapping(value = {"/rpc", "/rpc/{_gp}/{_mt}"}, method = {RequestMethod.POST, RequestMethod.GET})
     public void rpcInvoke(
             HttpServletRequest req,
@@ -157,6 +303,15 @@ public class ApiController {
         commonsInvoke(req, res, _gp, _mt, ApiEntry.RPC);
     }
 
+    /**
+     * sse 请求时地址，返回的content-type为text/event-stream
+     * @param req
+     * @param res
+     * @param _gp
+     * @param _mt
+     * @return
+     * @throws IOException
+     */
     @RequestMapping(value = {"/sse.api", "/sse.api/{_gp}/{_mt}"}, method = {RequestMethod.POST, RequestMethod.GET})
     public SseEmitter sseInvoke(
             HttpServletRequest req,
@@ -165,14 +320,20 @@ public class ApiController {
             @PathVariable(required = false) String _mt) throws IOException {
         long invokeTime = System.currentTimeMillis();
         try {
-            if (ssePublisher == null) {
+            ApiContext context = this.findContext(req, _gp, _mt, ApiEntry.SSE);
+            Object object = process(req, res, context);
+            if (object instanceof SseEmitterWrapper wrapper) {
+                if (ssePublisher == null) {
+                    throw new ServiceException(CoreExceptionDefinition.LAUNCHER_NOT_SUPPORT);
+                }
+                logger.info("[HTTP] R=SSE 建立, IdentityOwnerKey={}", wrapper.getIdentityOwnerKey());
+                return wrapper.getSseEmitter();
+            } else if (object instanceof SseEmitter sseEmitter){
+                logger.info("[HTTP] R=SSE 建立");
+                return sseEmitter;
+            } else {
                 throw new ServiceException(CoreExceptionDefinition.LAUNCHER_NOT_SUPPORT);
             }
-            ApiContext context = this.findContext(req, _gp, _mt, ApiEntry.SSE);
-            SseEmitterWrapper wrapper = (SseEmitterWrapper) process(req, res, context);
-            ssePublisher.join(wrapper.getIdentityOwnerKey(), wrapper.getSseEmitter());
-            logger.info("[HTTP] R=SSE 建立, IdentityOwnerKey={}", wrapper.getIdentityOwnerKey());
-            return wrapper.getSseEmitter();
         } catch (ServiceException e) {
             res.setContentType(MediaType.APPLICATION_JSON_VALUE);
             byte[] result = buildServiceResult(res, invokeTime, e).getBytes(StandardCharsets.UTF_8);
@@ -186,6 +347,14 @@ public class ApiController {
         }
     }
 
+    /**
+     * 普通请求
+     * @param req
+     * @param res
+     * @param _gp
+     * @param _mt
+     * @throws IOException
+     */
     @RequestMapping(value = {"/m.api", "/m.api/{_gp}/{_mt}"}, method = {RequestMethod.POST, RequestMethod.GET})
     public void invoke(
             HttpServletRequest req,
@@ -200,11 +369,12 @@ public class ApiController {
         long invokeTime = System.currentTimeMillis();
         try {
             ApiContext context = this.findContext(req, _gp, _mt, apiEntry);
-            Method method = context.method;
-            if (method.getReturnType() == SseEmitterWrapper.class && apiEntry != ApiEntry.SSE) {
-                throw new ServiceException(CoreExceptionDefinition.LAUNCHER_ONLY_SSE_SUPPORT);
-            }
             Object obj = process(req, res, context);
+            if (obj instanceof WsWrapper) {
+                // 直接返回成功即可
+                logger.info("[WS] 连接成功");
+                return;
+            }
             if (Const.IGNORE_PARAM_LIST.contains(obj.getClass())) {
                 result = obj.toString().getBytes(StandardCharsets.UTF_8);
             } else if (context.httpExcel != null && obj instanceof GatewayResponse<?> gatewayResponse) {
@@ -355,6 +525,15 @@ public class ApiController {
             trace = System.currentTimeMillis() + "";
         }
         MDC.put("trace", trace);
+
+        // 判断API URL是否正确
+        if ((apiContext.method.getReturnType() == SseEmitterWrapper.class || apiContext.method.getReturnType() == SseEmitter.class) && apiEntry != ApiEntry.SSE) {
+            throw new ServiceException(CoreExceptionDefinition.LAUNCHER_ONLY_SSE_SUPPORT);
+        }
+        if (apiContext.method.getReturnType() == WsWrapper.class && apiEntry != ApiEntry.WS) {
+            throw new ServiceException(CoreExceptionDefinition.LAUNCHER_ONLY_WS_SUPPORT);
+        }
+
         return apiContext;
     }
 
@@ -581,7 +760,7 @@ public class ApiController {
             ClassLoader classLoader = serviceBean.getClass().getClassLoader();
             Thread.currentThread().setContextClassLoader(classLoader);
             Object invokeObj = customInvoker.invoke(serviceBean, method, args);
-            if (invokeObj instanceof SseEmitterWrapper) {
+            if (invokeObj instanceof SseEmitterWrapper || invokeObj instanceof SseEmitter || invokeObj instanceof WsWrapper) {
                 // 直接返回
                 return invokeObj;
             }
