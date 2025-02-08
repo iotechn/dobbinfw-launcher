@@ -374,8 +374,11 @@ public class ClusterApiManager implements InitializingBean, ApplicationContextAw
                             logger.info("[Api] 参数未注解: {}", parameter.getName());
                             break;
                         }
-                        // 若非这三种类型，则直接不显示在文档上面
-                        if (httpParam.type() != HttpParamType.COMMON && httpParam.type() != HttpParamType.FILE && httpParam.type() != HttpParamType.EXCEL) {
+                        // 若非这4种类型，则直接不显示在文档上面
+                        if (httpParam.type() != HttpParamType.COMMON
+                                && httpParam.type() != HttpParamType.HEADER
+                                && httpParam.type() != HttpParamType.FILE
+                                && httpParam.type() != HttpParamType.EXCEL) {
                             continue;
                         }
                         // 封装类型
@@ -385,32 +388,45 @@ public class ClusterApiManager implements InitializingBean, ApplicationContextAw
                             // 单独处理下这两个
                             schemaProperty.setType("file");
                         }
-                        // 将类名，设置为title
-                        schemaProperty.setTitle(parameterType.getSimpleName());
-                        BaseEnums[] enumConstants = httpParam.enums().getEnumConstants();
-                        if (httpParam.enums() != EmptyEnums.class && enumConstants.length > 0) {
-                            Class<? extends BaseEnums> enums = httpParam.enums();
-                            schemaProperty.setDescription(httpParam.description() + ":" + this.getEnumsMemo(enums) + "\n\n枚举类:" + httpParam.enums().getTypeName());
+
+                        if (httpParam.type() == HttpParamType.HEADER) {
+                            // Header作用于Operation上
+                            io.swagger.v3.oas.models.parameters.Parameter headerParam =
+                                    new io.swagger.v3.oas.models.parameters.Parameter()
+                                            .in("header")
+                                            .name(httpParam.name())
+                                            .description(httpParam.description());
+                            postOperation.addParametersItem(headerParam);
                         } else {
-                            schemaProperty.setDescription(httpParam.description());
+                            // 其他作用于Schema
+                            // 将类名，设置为title
+                            schemaProperty.setTitle(parameterType.getSimpleName());
+                            BaseEnums[] enumConstants = httpParam.enums().getEnumConstants();
+                            if (httpParam.enums() != EmptyEnums.class && enumConstants.length > 0) {
+                                Class<? extends BaseEnums> enums = httpParam.enums();
+                                schemaProperty.setDescription(httpParam.description() + ":" + this.getEnumsMemo(enums) + "\n\n枚举类:" + httpParam.enums().getTypeName());
+                            } else {
+                                schemaProperty.setDescription(httpParam.description());
+                            }
+                            if (parameter.getAnnotation(NotNull.class) != null) {
+                                requiredList.add(httpParam.name());
+                            }
+                            if ("object".equals(schemaProperty.getType())) {
+                                Schema<?> entitySchema = this.generateEntitySchema(parameterType, new Stack<>(), actualTypeArguments);
+                                schemaProperty.setProperties(entitySchema.getProperties());
+                                schemaProperty.setRequired(entitySchema.getRequired());
+                            }
+                            if ("array".equals(schemaProperty.getType())) {
+                                Class<?> clazz = httpParam.arrayClass();
+                                Schema<?> arrayItem = generateEntitySchema(clazz, new Stack<>(), actualTypeArguments);
+                                schemaProperty.setItems(arrayItem);
+                            }
+                            if ("file".equals(schemaProperty.getType())) {
+                                anyFile = true;
+                            }
+                            schema.getProperties().put(httpParam.name(), schemaProperty);
                         }
-                        if (parameter.getAnnotation(NotNull.class) != null) {
-                            requiredList.add(httpParam.name());
-                        }
-                        if ("object".equals(schemaProperty.getType())) {
-                            Schema<?> entitySchema = this.generateEntitySchema(parameterType, new Stack<>(), actualTypeArguments);
-                            schemaProperty.setProperties(entitySchema.getProperties());
-                            schemaProperty.setRequired(entitySchema.getRequired());
-                        }
-                        if ("array".equals(schemaProperty.getType())) {
-                            Class<?> clazz = httpParam.arrayClass();
-                            Schema<?> arrayItem = generateEntitySchema(clazz, new Stack<>(), actualTypeArguments);
-                            schemaProperty.setItems(arrayItem);
-                        }
-                        if ("file".equals(schemaProperty.getType())) {
-                            anyFile = true;
-                        }
-                        schema.getProperties().put(httpParam.name(), schemaProperty);
+
                     }
                 }
                 schema.setRequired(requiredList);
