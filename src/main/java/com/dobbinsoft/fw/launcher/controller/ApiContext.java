@@ -2,6 +2,7 @@ package com.dobbinsoft.fw.launcher.controller;
 
 import com.dobbinsoft.fw.core.annotation.HttpExcel;
 import com.dobbinsoft.fw.core.annotation.HttpMethod;
+import com.dobbinsoft.fw.core.exception.ServiceException;
 import com.dobbinsoft.fw.support.utils.JacksonUtil;
 import lombok.Getter;
 import lombok.Setter;
@@ -23,6 +24,10 @@ public class ApiContext {
     @Setter
     @Getter
     private Map<String, String> parameterSingleMap;
+
+    @Getter
+    @Setter
+    private ServiceException serviceException;
 
     public String requestLogMap() {
         if (parameterMap != null) {

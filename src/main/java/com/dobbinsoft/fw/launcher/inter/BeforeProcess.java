@@ -1,11 +1,12 @@
 package com.dobbinsoft.fw.launcher.inter;
 
 import com.dobbinsoft.fw.core.exception.ServiceException;
-
-import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.web.reactive.function.server.ServerRequest;
+import org.springframework.web.server.ServerWebExchange;
+import reactor.core.publisher.Mono;
 
 public interface BeforeProcess {
 
-    public void before(HttpServletRequest request) throws ServiceException;
+    public Mono<Void> before(ServerWebExchange exchange) throws ServiceException;
 
 }

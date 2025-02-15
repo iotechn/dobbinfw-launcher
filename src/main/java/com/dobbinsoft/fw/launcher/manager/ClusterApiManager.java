@@ -12,7 +12,6 @@ import com.dobbinsoft.fw.core.exception.ServiceException;
 import com.dobbinsoft.fw.core.model.GatewayResponse;
 import com.dobbinsoft.fw.launcher.inter.AfterRegisterApiComplete;
 import com.dobbinsoft.fw.support.model.PermissionPoint;
-import com.dobbinsoft.fw.support.model.SseEmitterWrapper;
 import com.dobbinsoft.fw.support.utils.StringUtils;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.Operation;
@@ -37,6 +36,7 @@ import org.springframework.context.ApplicationContextAware;
 import org.springframework.stereotype.Component;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
+import reactor.core.publisher.Flux;
 
 import java.lang.reflect.*;
 import java.math.BigDecimal;
@@ -430,7 +430,7 @@ public class ClusterApiManager implements InitializingBean, ApplicationContextAw
                 Content responseContent = apiResponse.getContent();
                 MediaType responseMediaType = new MediaType();
                 Schema<?> responseSchema;
-                if (returnType == SseEmitterWrapper.class) {
+                if (returnType == Flux.class) {
                     responseContent.put(org.springframework.http.MediaType.TEXT_EVENT_STREAM_VALUE, responseMediaType);
                     responseSchema = new Schema<>();
                     responseSchema.setType("object");

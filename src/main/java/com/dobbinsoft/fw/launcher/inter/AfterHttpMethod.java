@@ -1,7 +1,7 @@
 package com.dobbinsoft.fw.launcher.inter;
 
 
-import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.web.server.ServerWebExchange;
 
 /**
  * ClassName: AfterHttpMethod
@@ -9,6 +9,6 @@ import jakarta.servlet.http.HttpServletResponse;
  */
 public interface AfterHttpMethod {
 
-    public void after(HttpServletResponse response, String result);
+    public void after(ServerWebExchange response, String result);
 
 }
