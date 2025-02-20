@@ -9,6 +9,7 @@ import com.dobbinsoft.fw.support.session.SessionStorage;
 import com.dobbinsoft.fw.support.utils.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import reactor.core.publisher.Mono;
 
 @Component
 public class ClusterAdminAuthenticator implements IAdminAuthenticator {
@@ -23,7 +24,7 @@ public class ClusterAdminAuthenticator implements IAdminAuthenticator {
     private FwSystemProperties fwSystemProperties;
 
     @Override
-    public PermissionOwner getAdmin(String accessToken) throws ServiceException {
+    public Mono<PermissionOwner> getAdmin(String accessToken) throws ServiceException {
         if (StringUtils.isEmpty(accessToken)) {
             return null;
         }
@@ -31,7 +32,8 @@ public class ClusterAdminAuthenticator implements IAdminAuthenticator {
         if (p != null) {
             sessionUtil.setAdmin(p);
             sessionStorage.renew(Const.ADMIN_REDIS_PREFIX, accessToken, fwSystemProperties.getAdminSessionPeriod());
+            return Mono.just(p);
         }
-        return p;
+        return Mono.empty();
     }
 }

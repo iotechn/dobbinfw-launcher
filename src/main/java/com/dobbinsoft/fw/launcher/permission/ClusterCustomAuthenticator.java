@@ -9,6 +9,7 @@ import com.dobbinsoft.fw.support.session.SessionStorage;
 import com.dobbinsoft.fw.support.utils.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import reactor.core.publisher.Mono;
 
 @Component
 public class ClusterCustomAuthenticator implements ICustomAuthenticator {
@@ -23,7 +24,7 @@ public class ClusterCustomAuthenticator implements ICustomAuthenticator {
     private FwSystemProperties fwSystemProperties;
 
     @Override
-    public CustomAccountOwner getCustom(Class clazz, String accessToken) throws ServiceException {
+    public Mono<CustomAccountOwner> getCustom(Class clazz, String accessToken) throws ServiceException {
         if (StringUtils.isEmpty(accessToken)) {
             return null;
         }
@@ -33,7 +34,8 @@ public class ClusterCustomAuthenticator implements ICustomAuthenticator {
         if (identityOwner != null) {
             sessionUtil.setCustom(identityOwner);
             sessionStorage.renew(key, accessToken, fwSystemProperties.getUserSessionPeriod());
+            return Mono.just(identityOwner);
         }
-        return identityOwner;
+        return Mono.empty();
     }
 }

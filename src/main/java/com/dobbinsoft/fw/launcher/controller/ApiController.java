@@ -125,6 +125,9 @@ public class ApiController {
     @Autowired(required = false)
     private WsEventReceiver wsEventReceiver;
 
+    @Autowired
+    private IApiManager apiManager;
+
     private static final String WS_CURRENT_IDENTITY_OWNER_KEY = "WS_CURRENT_IDENTITY_OWNER_KEY";
 
     private static final Pattern URI_PATTERN = Pattern.compile("/ws\\.api/([^/]+)/([^/]+)");
@@ -487,95 +490,79 @@ public class ApiController {
      * @throws ServiceException 服务异常
      */
     private Mono<ApiContext> findContext(ServerWebExchange exchange, String _gp, String _mt, ApiEntry apiEntry) {
-        Mono<ApiContext> contextMono;
-        // 判断请求类型
-        HttpHeaders headers = exchange.getRequest().getHeaders();
-        String contentType = RequestUtils.getHeaderValue(headers, HttpHeaders.CONTENT_TYPE);
-        if (MediaType.APPLICATION_JSON_VALUE.equals(contentType)) {
-            contextMono = exchange.getRequest().getBody()
-                    .reduce(DataBuffer::write)
-                    .map(dataBuffer -> {
-                        byte[] bytes = new byte[dataBuffer.readableByteCount()];
-                        dataBuffer.read(bytes);
-                        DataBufferUtils.release(dataBuffer);
-                        ApiContext apiContext = new ApiContext();
-                        Map<String, Object> map = JacksonUtil.toMap(new String(bytes, StandardCharsets.UTF_8), String.class, Object.class);
-                        Map<String, String> newMap = new HashMap<>();
-                        if (map != null) {
-                            // 支持Post空传参
-                            map.forEach((k, v) -> {
-                                if (v == null) {
-                                    return;
-                                }
-                                if (Const.IGNORE_PARAM_LIST.contains(v.getClass())) {
-                                    newMap.put(k, v.toString());
-                                } else {
-                                    newMap.put(k, JacksonUtil.toJSONString(v));
-                                }
-                            });
-                        }
-                        apiContext.setParameterSingleMap(newMap);
-                        return apiContext;
-                    });
-        } else if (StringUtils.isEmpty(contentType)
-                || contentType.startsWith(MediaType.APPLICATION_FORM_URLENCODED_VALUE)
-                || contentType.startsWith(MediaType.MULTIPART_FORM_DATA_VALUE)) {
-            // GET请求时， contentType为null
+        // 如果_gp,_mt已经预知，那么我们就没必要从流里面读取 _gp,_mt。也就是读请求报文流和获取session这两个IO操作可并行执行。所以在webflux版本中，我们强制要求_gp, _mt 两个字段必须传在URL中。
+        if (StringUtils.isEmpty(_gp) || StringUtils.isEmpty(_mt)) {
             ApiContext apiContext = new ApiContext();
-            MultiValueMap<String, String> temp = exchange.getRequest().getQueryParams();
-            Map<String, String> paramterSingleMap = new HashMap<>();
-            temp.forEach((k, v) -> {
-                paramterSingleMap.put(k, v.getFirst());
-            });
-            apiContext.setParameterSingleMap(paramterSingleMap);
-            contextMono = Mono.just(apiContext);
-        } else {
-            ApiContext apiContext = new ApiContext();
-            apiContext.setServiceException(new ServiceException(CoreExceptionDefinition.LAUNCHER_CONTENT_TYPE_NOT_SUPPORT));
-            contextMono = Mono.just(apiContext);
+            apiContext.setServiceException(new ServiceException(CoreExceptionDefinition.LAUNCHER_API_NOT_EXISTS));
+            return Mono.just(apiContext);
         }
-        return contextMono.map(apiContext -> {
-            IApiManager apiManager = applicationContext.getBean(IApiManager.class);
-            if (StringUtils.isNotEmpty(_gp) && StringUtils.isNotEmpty(_mt)) {
-                apiContext._gp = _gp;
-                apiContext._mt = _mt;
-            } else {
-                apiContext._gp = apiContext.getParameter("_gp");
-                apiContext._mt = apiContext.getParameter("_mt");
-                if (apiContext._gp == null || apiContext._mt == null) {
-                    apiContext.setServiceException(new ServiceException(CoreExceptionDefinition.LAUNCHER_API_NOT_EXISTS));
-                    return apiContext;
+        HttpHeaders headers = exchange.getRequest().getHeaders();
+        Method method = apiEntry == ApiEntry.RPC ? apiManager.getRpcMethod(_gp, _mt) : apiManager.getMethod(_gp, _mt);
+        // 1. 获取Context
+        Mono<ApiContext> contextMono = ApiContext.getApiContextMono(exchange, headers, method);
+        // 2. 尝试获取Session
+        Parameter[] parameters = method.getParameters();
+        Mono<? extends IdentityOwner> identityMono = Mono.empty();
+        HttpParamType identityType = null;
+        try {
+            for (Parameter parameter : parameters) {
+                HttpParam httpParam = parameter.getAnnotation(HttpParam.class);
+                if (httpParam.type() == HttpParamType.ADMIN_ID) {
+                    String accessToken = RequestUtils.getHeaderValue(headers, Const.ADMIN_ACCESS_TOKEN);
+                    identityMono = adminAuthenticator.getAdmin(accessToken);
+                    identityType = HttpParamType.ADMIN_ID;
+                    break;
+                } else if (httpParam.type() == HttpParamType.USER_ID) {
+                    String accessToken = RequestUtils.getHeaderValue(headers, Const.USER_ACCESS_TOKEN);
+                    identityMono = userAuthenticator.getUser(accessToken);
+                    identityType = HttpParamType.USER_ID;
+                    break;
+                } else if (httpParam.type() == HttpParamType.CUSTOM_ACCOUNT_ID) {
+                    Class clazz = httpParam.customAccountClass();
+                    String simpleName = clazz.getSimpleName();
+                    String header = simpleName.replace("DO", "").replace("DTO", "");
+                    String accessToken = RequestUtils.getHeaderValue(headers, header.toUpperCase() + "TOKEN");
+                    identityMono = customAuthenticator.getCustom(clazz, accessToken);
+                    identityType = HttpParamType.CUSTOM_ACCOUNT_ID;
+                    break;
                 }
             }
-            apiContext.method = apiEntry == ApiEntry.RPC ? apiManager.getRpcMethod(apiContext._gp, apiContext._mt) : apiManager.getMethod(apiContext._gp, apiContext._mt);
-            if (apiContext.method == null) {
-                apiContext.setServiceException(new ServiceException(CoreExceptionDefinition.LAUNCHER_API_NOT_EXISTS));
-                return apiContext;
+        } catch (ServiceException e) {
+            ApiContext apiContext = new ApiContext();
+            apiContext.setServiceException(e);
+            return Mono.just(apiContext);
+        }
+        HttpParamType finalIdentityType = identityType;
+        return Mono.zip(contextMono, identityMono).flatMap(tuple -> {
+            ApiContext apiContext = tuple.getT1();
+            if (apiContext.getServiceException() != null) {
+                return Mono.just(apiContext);
+            }
+            IdentityOwner identityOwner = tuple.getT2();
+            if (finalIdentityType != null) {
+                switch (finalIdentityType) {
+                    case ADMIN_ID -> apiContext.setAdmin((PermissionOwner) identityOwner);
+                    case USER_ID -> apiContext.setUser(identityOwner);
+                    case CUSTOM_ACCOUNT_ID -> apiContext.setCustom((CustomAccountOwner) identityOwner);
+                }
             }
             apiContext.httpMethod = apiContext.method.getAnnotation(HttpMethod.class);
             if (apiContext.httpMethod == null) {
                 //只起标记作用防止调到封闭方法了
                 apiContext.setServiceException(new ServiceException(CoreExceptionDefinition.LAUNCHER_API_NOT_EXISTS));
-                return apiContext;
+                return Mono.just(apiContext);
             }
             apiContext.httpExcel = apiContext.method.getAnnotation(HttpExcel.class);
-            String trace = RequestUtils.getHeaderValue(headers, Const.HTTP_TRACE_HEADER);
-            if (StringUtils.isEmpty(trace)) {
-                // 可能会冲突
-                trace = System.currentTimeMillis() + "";
-            }
-            MDC.put("trace", trace);
-
             // 判断API URL是否正确
             if ((apiContext.method.getReturnType() == Flux.class) && apiEntry != ApiEntry.SSE) {
                 apiContext.setServiceException(new ServiceException(CoreExceptionDefinition.LAUNCHER_ONLY_SSE_SUPPORT));
-                return apiContext;
+                return Mono.just(apiContext);
             }
             if (apiContext.method.getReturnType() == WsWrapper.class && apiEntry != ApiEntry.WS) {
                 apiContext.setServiceException(new ServiceException(CoreExceptionDefinition.LAUNCHER_ONLY_WS_SUPPORT));
-                return apiContext;
+                return Mono.just(apiContext);
             }
-            return apiContext;
+            return Mono.just(apiContext);
         });
     }
 
@@ -613,8 +600,7 @@ public class ApiController {
             String permission = httpMethod.permission();
             if (StringUtils.isNotEmpty(permission)) {
                 //若需要权限，则校验当前用户是否具有权限
-                String accessToken = RequestUtils.getHeaderValue(headers, Const.ADMIN_ACCESS_TOKEN);
-                PermissionOwner adminDTO = adminAuthenticator.getAdmin(accessToken);
+                PermissionOwner adminDTO = apiContext.getAdmin();
                 sessionUtil.setAdmin(adminDTO);
                 if ((adminDTO == null || !sessionUtil.hasPerm(permission))) {
                     // 没有权限
@@ -699,7 +685,7 @@ public class ApiController {
                     }
                 } else if (httpParam.type() == HttpParamType.USER_ID) {
                     String accessToken = RequestUtils.getHeaderValue(headers, Const.USER_ACCESS_TOKEN);
-                    IdentityOwner user = userAuthenticator.getUser(accessToken);
+                    IdentityOwner user = apiContext.getUser();
                     if (user != null) {
                         args[i] = user.getId();
                         personId = user.getId();
@@ -711,7 +697,7 @@ public class ApiController {
                     }
                 } else if (httpParam.type() == HttpParamType.ADMIN_ID) {
                     String accessToken = RequestUtils.getHeaderValue(headers, Const.ADMIN_ACCESS_TOKEN);
-                    PermissionOwner adminDTO = adminAuthenticator.getAdmin(accessToken);
+                    PermissionOwner adminDTO = apiContext.getAdmin();
                     if (adminDTO != null) {
                         sessionUtil.setAdmin(adminDTO);
                         args[i] = adminDTO.getId();
@@ -730,7 +716,7 @@ public class ApiController {
                     String simpleName = clazz.getSimpleName();
                     String header = simpleName.replace("DO", "").replace("DTO", "");
                     String accessToken = RequestUtils.getHeaderValue(headers, header.toUpperCase() + "TOKEN");
-                    CustomAccountOwner custom = customAuthenticator.getCustom(clazz, accessToken);
+                    CustomAccountOwner custom = apiContext.getCustom();
                     if (custom != null) {
                         sessionUtil.setCustom(custom);
                         args[i] = custom.getId();

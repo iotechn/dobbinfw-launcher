@@ -9,6 +9,7 @@ import com.dobbinsoft.fw.support.session.SessionStorage;
 import com.dobbinsoft.fw.support.utils.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import reactor.core.publisher.Mono;
 
 /**
  * 集群系统用户获取方式
@@ -26,7 +27,7 @@ public class ClusterUserAuthenticator implements IUserAuthenticator {
     private FwSystemProperties fwSystemProperties;
 
     @Override
-    public IdentityOwner getUser(String accessToken) throws ServiceException {
+    public Mono<IdentityOwner> getUser(String accessToken) throws ServiceException {
         if (StringUtils.isEmpty(accessToken)) {
             return null;
         }
@@ -34,7 +35,8 @@ public class ClusterUserAuthenticator implements IUserAuthenticator {
         if (identityOwner != null) {
             sessionUtil.setUser(identityOwner);
             sessionStorage.renew(Const.USER_REDIS_PREFIX, accessToken, fwSystemProperties.getUserSessionPeriod());
+            return Mono.just(identityOwner);
         }
-        return identityOwner;
+        return Mono.empty();
     }
 }
