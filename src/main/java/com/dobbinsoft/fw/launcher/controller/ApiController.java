@@ -47,10 +47,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.MultiValueMap;
 import org.springframework.util.ObjectUtils;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestMethod;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -292,9 +289,11 @@ public class ApiController {
     public Flux<?> sseInvoke(
             ServerWebExchange exchange,
             @PathVariable(required = false) String _gp,
-            @PathVariable(required = false) String _mt) {
+            @PathVariable(required = false) String _mt,
+            @RequestParam(required = false, name = "_gp") String _gpParam,
+            @RequestParam(required = false, name = "_mt") String _mtParam) {
         // 获取请求上下文
-        return this.findContext(exchange, _gp, _mt, ApiEntry.SSE)
+        return this.findContext(exchange, StringUtils.firstNonEmpty(_gp, _gpParam), StringUtils.firstNonEmpty(_mt, _mtParam), ApiEntry.SSE)
                 .flatMapMany(context -> {
                     // 如果上下文中有异常，直接返回错误
                     if (context.getServiceException() != null) {
