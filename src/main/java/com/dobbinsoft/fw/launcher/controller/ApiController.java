@@ -299,30 +299,20 @@ public class ApiController {
                     if (context.getServiceException() != null) {
                         return Flux.error(context.getServiceException());
                     }
-
                     try {
-                        Mono<Void> before = Mono.empty();
-                        if (this.beforeProcess != null) {
-                            before = this.beforeProcess.before(exchange);
+                        Object result = processSync(exchange, context);
+                        if (result instanceof Flux<?>) {
+                            return (Flux<?>) result;
+                        } else {
+                            // 如果不是 Flux，返回错误
+                            return Flux.error(new ServiceException(CoreExceptionDefinition.LAUNCHER_SSE_ONLY_RETURN_FLUX));
                         }
-                        // 处理请求
-                        return before
-                                .then(Mono.fromCallable(() -> processSync(exchange, context)))
-                                .flatMapMany(result -> {
-                                    if (result instanceof Flux<?>) {
-                                        return (Flux<?>) result;
-                                    } else {
-                                        // 如果不是 Flux，返回错误
-                                        return Flux.error(new ServiceException(CoreExceptionDefinition.LAUNCHER_SSE_ONLY_RETURN_FLUX));
-                                    }
-                                })
-                                .onErrorMap(e -> new ServiceException("Process failed"));
-
                     } catch (ServiceException e) {
                         // 捕获 ServiceException 并返回错误
                         return Flux.error(e);
                     } catch (Exception e) {
                         // 捕获其他异常并返回错误
+                        logger.error("[SSE 系统未知异常]", e);
                         return Flux.error(new ServiceException(CoreExceptionDefinition.LAUNCHER_UNKNOWN_EXCEPTION));
                     }
                 })
@@ -363,73 +353,70 @@ public class ApiController {
             if (context.getServiceException() != null) {
                 return Mono.error(context.getServiceException());
             }
-            Mono<Object> process;
+            Object obj;
             try {
-                process = process(exchange, context);
+                obj = processSync(exchange, context);
             } catch (ServiceException e) {
                 return Mono.error(e);
             }
-            return process.flatMap(obj -> {
-                byte[] result;
-                MediaType contentType = MediaType.APPLICATION_JSON;
-                try {
-                    if (Const.IGNORE_PARAM_LIST.contains(obj.getClass())) {
-                        contentType = MediaType.TEXT_HTML;
-                        result = obj.toString().getBytes(StandardCharsets.UTF_8);
-                    } else if (context.httpExcel != null && obj instanceof GatewayResponse<?> gatewayResponse) {
-                        contentType = new MediaType("application", "vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-                        // 直接输出文件
-                        ExcelData<?> excelData = new ExcelData<>();
-                        Object respData = gatewayResponse.getData();
-                        // 设置文件名
-                        String fileName = context.httpExcel.fileName() + "-" + new SimpleDateFormat("yyyyMMddHHmmss").format(new Date());
-                        headerMap.put("Content-Disposition", "attachment;filename=" + URLEncoder.encode(fileName, StandardCharsets.UTF_8));
-                        if (respData instanceof List<?>) {
-                            List data = (List<?>) respData;
-                            excelData.setData(data);
-                            excelData.setFileName(fileName);
-                            result = ExcelUtils.exportExcel(excelData.getData(), context.httpExcel.clazz());
-                        } else if (respData instanceof ExcelBigExportAdapter<?> excelBigExportAdapter) {
-                            result = ExcelUtils.exportBigExcel(excelBigExportAdapter);
-                        } else {
-                            return Mono.error(new RuntimeException("Http Excel 只能返回List或者ExcelBigExportAdapter"));
-                        }
+            byte[] result;
+            MediaType contentType = MediaType.APPLICATION_JSON;
+            try {
+                if (Const.IGNORE_PARAM_LIST.contains(obj.getClass())) {
+                    contentType = MediaType.TEXT_HTML;
+                    result = obj.toString().getBytes(StandardCharsets.UTF_8);
+                } else if (context.httpExcel != null && obj instanceof GatewayResponse<?> gatewayResponse) {
+                    contentType = new MediaType("application", "vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+                    // 直接输出文件
+                    ExcelData<?> excelData = new ExcelData<>();
+                    Object respData = gatewayResponse.getData();
+                    // 设置文件名
+                    String fileName = context.httpExcel.fileName() + "-" + new SimpleDateFormat("yyyyMMddHHmmss").format(new Date());
+                    headerMap.put("Content-Disposition", "attachment;filename=" + URLEncoder.encode(fileName, StandardCharsets.UTF_8));
+                    if (respData instanceof List<?>) {
+                        List data = (List<?>) respData;
+                        excelData.setData(data);
+                        excelData.setFileName(fileName);
+                        result = ExcelUtils.exportExcel(excelData.getData(), context.httpExcel.clazz());
+                    } else if (respData instanceof ExcelBigExportAdapter<?> excelBigExportAdapter) {
+                        result = ExcelUtils.exportBigExcel(excelBigExportAdapter);
+                    } else {
+                        return Mono.error(new RuntimeException("Http Excel 只能返回List或者ExcelBigExportAdapter"));
+                    }
+                    afterPost(exchange, invokeTime, obj, false, context.httpMethod.noLog());
+                } else if (obj instanceof GatewayResponse<?> gatewayResponse) {
+                    gatewayResponse.setTimestamp(invokeTime);
+                    if (gatewayResponse.getContentType() != null) {
+                        contentType = gatewayResponse.getContentType();
+                    }
+                    if (CollectionUtils.isNotEmpty(gatewayResponse.getHttpHeaders())) {
+                        headerMap.putAll(gatewayResponse.getHttpHeaders());
+                    }
+                    Object data = gatewayResponse.getData();
+                    if (data instanceof byte[]) {
+                        result = (byte[]) data;
                         afterPost(exchange, invokeTime, obj, false, context.httpMethod.noLog());
-                    } else if (obj instanceof GatewayResponse<?> gatewayResponse) {
-                        gatewayResponse.setTimestamp(invokeTime);
-                        if (gatewayResponse.getContentType() != null) {
-                            contentType = gatewayResponse.getContentType();
-                        }
-                        if (CollectionUtils.isNotEmpty(gatewayResponse.getHttpHeaders())) {
-                            headerMap.putAll(gatewayResponse.getHttpHeaders());
-                        }
-                        Object data = gatewayResponse.getData();
-                        if (data instanceof byte[]) {
-                            result = (byte[]) data;
-                            afterPost(exchange, invokeTime, obj, false, context.httpMethod.noLog());
-                        } else {
-                            result = afterPost(exchange, invokeTime, obj, true, context.httpMethod.noLog()).getBytes(StandardCharsets.UTF_8);
-                        }
-                    } else if (obj instanceof Flux<?>) {
-                        // SSE
-                        result = afterPost(exchange, invokeTime, obj, false, context.httpMethod.noLog()).getBytes(StandardCharsets.UTF_8);
                     } else {
                         result = afterPost(exchange, invokeTime, obj, true, context.httpMethod.noLog()).getBytes(StandardCharsets.UTF_8);
                     }
-                } finally {
-                    MDC.clear();
-                    sessionUtil.clear();
+                } else if (obj instanceof Flux<?>) {
+                    // SSE
+                    result = afterPost(exchange, invokeTime, obj, false, context.httpMethod.noLog()).getBytes(StandardCharsets.UTF_8);
+                } else {
+                    result = afterPost(exchange, invokeTime, obj, true, context.httpMethod.noLog()).getBytes(StandardCharsets.UTF_8);
                 }
-                ResponseEntity.BodyBuilder builder = ResponseEntity
-                        .ok();
-                // 添加自定义Header
-                headerMap.forEach(builder::header);
-                ResponseEntity<byte[]> body = builder
-                        .contentType(contentType)
-                        .body(result);
-                return Mono.just(body);
-            });
-
+            } finally {
+                MDC.clear();
+                sessionUtil.clear();
+            }
+            ResponseEntity.BodyBuilder builder = ResponseEntity
+                    .ok();
+            // 添加自定义Header
+            headerMap.forEach(builder::header);
+            ResponseEntity<byte[]> body = builder
+                    .contentType(contentType)
+                    .body(result);
+            return Mono.just(body);
 
         }).onErrorResume(e -> {
             byte[] result;
@@ -489,93 +476,114 @@ public class ApiController {
      * @throws ServiceException 服务异常
      */
     private Mono<ApiContext> findContext(ServerWebExchange exchange, String _gp, String _mt, ApiEntry apiEntry) {
+
         // 如果_gp,_mt已经预知，那么我们就没必要从流里面读取 _gp,_mt。也就是读请求报文流和获取session这两个IO操作可并行执行。所以在webflux版本中，我们强制要求_gp, _mt 两个字段必须传在URL中。
         if (StringUtils.isEmpty(_gp) || StringUtils.isEmpty(_mt)) {
             ApiContext apiContext = new ApiContext();
             apiContext.setServiceException(new ServiceException(CoreExceptionDefinition.LAUNCHER_API_NOT_EXISTS));
             return Mono.just(apiContext);
         }
-        HttpHeaders headers = exchange.getRequest().getHeaders();
-        Method method = apiEntry == ApiEntry.RPC ? apiManager.getRpcMethod(_gp, _mt) : apiManager.getMethod(_gp, _mt);
-        // 1. 获取Context
-        Mono<ApiContext> contextMono = ApiContext.getApiContextMono(exchange, headers, method);
-        // 2. 尝试获取Session
-        Parameter[] parameters = method.getParameters();
-        Mono<? extends IdentityOwner> identityMono = Mono.empty();
-        HttpParamType identityType = null;
-        try {
-            for (Parameter parameter : parameters) {
-                HttpParam httpParam = parameter.getAnnotation(HttpParam.class);
-                if (httpParam.type() == HttpParamType.ADMIN_ID) {
-                    String accessToken = RequestUtils.getHeaderValue(headers, Const.ADMIN_ACCESS_TOKEN);
-                    identityMono = adminAuthenticator.getAdmin(accessToken);
-                    identityType = HttpParamType.ADMIN_ID;
-                    break;
-                } else if (httpParam.type() == HttpParamType.USER_ID) {
-                    String accessToken = RequestUtils.getHeaderValue(headers, Const.USER_ACCESS_TOKEN);
-                    identityMono = userAuthenticator.getUser(accessToken);
-                    identityType = HttpParamType.USER_ID;
-                    break;
-                } else if (httpParam.type() == HttpParamType.CUSTOM_ACCOUNT_ID) {
-                    Class clazz = httpParam.customAccountClass();
-                    String simpleName = clazz.getSimpleName();
-                    String header = simpleName.replace("DO", "").replace("DTO", "");
-                    String accessToken = RequestUtils.getHeaderValue(headers, header.toUpperCase() + "TOKEN");
-                    identityMono = customAuthenticator.getCustom(clazz, accessToken);
-                    identityType = HttpParamType.CUSTOM_ACCOUNT_ID;
-                    break;
-                }
-            }
-        } catch (ServiceException e) {
-            ApiContext apiContext = new ApiContext();
-            apiContext.setServiceException(e);
-            return Mono.just(apiContext);
+        Mono<Void> before = Mono.empty();
+        if (beforeProcess != null) {
+            before = beforeProcess.before(exchange);
         }
-        HttpParamType finalIdentityType = identityType;
-        return Mono.zip(contextMono, identityMono).flatMap(tuple -> {
-            ApiContext apiContext = tuple.getT1();
-            if (apiContext.getServiceException() != null) {
-                return Mono.just(apiContext);
-            }
-            IdentityOwner identityOwner = tuple.getT2();
-            if (finalIdentityType != null) {
-                switch (finalIdentityType) {
-                    case ADMIN_ID -> apiContext.setAdmin((PermissionOwner) identityOwner);
-                    case USER_ID -> apiContext.setUser(identityOwner);
-                    case CUSTOM_ACCOUNT_ID -> apiContext.setCustom((CustomAccountOwner) identityOwner);
+        return before.then(Mono.defer(() -> {
+            HttpHeaders headers = exchange.getRequest().getHeaders();
+            Method method = apiEntry == ApiEntry.RPC ? apiManager.getRpcMethod(_gp, _mt) : apiManager.getMethod(_gp, _mt);
+
+            // 1. 获取Context
+            Mono<ApiContext> contextMono = ApiContext.getApiContextMono(exchange, headers, method);
+
+            // 2. 尝试获取Session
+            Parameter[] parameters = method.getParameters();
+            Mono<? extends IdentityOwner> identityMono = null;
+            HttpParamType identityType = null;
+
+            try {
+                for (Parameter parameter : parameters) {
+                    HttpParam httpParam = parameter.getAnnotation(HttpParam.class);
+                    if (httpParam.type() == HttpParamType.ADMIN_ID) {
+                        String accessToken = RequestUtils.getHeaderValue(headers, Const.ADMIN_ACCESS_TOKEN);
+                        identityMono = adminAuthenticator.getAdmin(accessToken);
+                        identityType = HttpParamType.ADMIN_ID;
+                        break;
+                    } else if (httpParam.type() == HttpParamType.USER_ID) {
+                        String accessToken = RequestUtils.getHeaderValue(headers, Const.USER_ACCESS_TOKEN);
+                        identityMono = userAuthenticator.getUser(accessToken);
+                        identityType = HttpParamType.USER_ID;
+                        break;
+                    } else if (httpParam.type() == HttpParamType.CUSTOM_ACCOUNT_ID) {
+                        Class clazz = httpParam.customAccountClass();
+                        String simpleName = clazz.getSimpleName();
+                        String header = simpleName.replace("DO", "").replace("DTO", "");
+                        String accessToken = RequestUtils.getHeaderValue(headers, header.toUpperCase() + "TOKEN");
+                        identityMono = customAuthenticator.getCustom(clazz, accessToken);
+                        identityType = HttpParamType.CUSTOM_ACCOUNT_ID;
+                        break;
+                    }
                 }
-            }
-            apiContext.httpMethod = apiContext.method.getAnnotation(HttpMethod.class);
-            if (apiContext.httpMethod == null) {
-                //只起标记作用防止调到封闭方法了
-                apiContext.setServiceException(new ServiceException(CoreExceptionDefinition.LAUNCHER_API_NOT_EXISTS));
+            } catch (ServiceException e) {
+                ApiContext apiContext = new ApiContext();
+                apiContext.setServiceException(e);
                 return Mono.just(apiContext);
             }
-            apiContext.httpExcel = apiContext.method.getAnnotation(HttpExcel.class);
-            // 判断API URL是否正确
-            if ((apiContext.method.getReturnType() == Flux.class) && apiEntry != ApiEntry.SSE) {
-                apiContext.setServiceException(new ServiceException(CoreExceptionDefinition.LAUNCHER_ONLY_SSE_SUPPORT));
-                return Mono.just(apiContext);
+
+            if (identityMono == null) {
+                // 无需登录的开放接口，则不需要等待读取redis
+                return contextMono.map(apiContext -> zip(apiEntry, null, apiContext, null));
             }
-            if (apiContext.method.getReturnType() == WsWrapper.class && apiEntry != ApiEntry.WS) {
-                apiContext.setServiceException(new ServiceException(CoreExceptionDefinition.LAUNCHER_ONLY_WS_SUPPORT));
+
+            HttpParamType finalIdentityType = identityType;
+            return Mono.zip(contextMono, identityMono)
+                    .switchIfEmpty(Mono.defer(() -> {
+                        switch (finalIdentityType) {
+                            case ADMIN_ID, CUSTOM_ACCOUNT_ID -> {
+                                return Mono.error(new ServiceException(CoreExceptionDefinition.LAUNCHER_ADMIN_NOT_LOGIN));
+                            }
+                            case USER_ID -> {
+                                return Mono.error(new ServiceException(CoreExceptionDefinition.LAUNCHER_USER_NOT_LOGIN));
+                            }
+                        }
+                        return Mono.empty();
+                    }))
+                    .flatMap(tuple -> {
+                ApiContext apiContext = tuple.getT1();
+                if (apiContext.getServiceException() != null) {
+                    return Mono.just(apiContext);
+                }
+                IdentityOwner identityOwner = tuple.getT2();
+                // 封装zip之后的apiContext信息
+                zip(apiEntry, finalIdentityType, apiContext, identityOwner);
                 return Mono.just(apiContext);
-            }
-            return Mono.just(apiContext);
-        });
+            });
+        }));
     }
 
-
-    private Mono<Object> process(ServerWebExchange exchange, ApiContext apiContext) throws ServiceException {
-        Mono<Void> before = Mono.empty(); // 默认空 Mono
-        if (this.beforeProcess != null) {
-            before = this.beforeProcess.before(exchange);
+    private static ApiContext zip(ApiEntry apiEntry, HttpParamType finalIdentityType, ApiContext apiContext, IdentityOwner identityOwner) {
+        if (finalIdentityType != null) {
+            switch (finalIdentityType) {
+                case ADMIN_ID -> apiContext.setAdmin((PermissionOwner) identityOwner);
+                case USER_ID -> apiContext.setUser(identityOwner);
+                case CUSTOM_ACCOUNT_ID -> apiContext.setCustom((CustomAccountOwner) identityOwner);
+            }
         }
-
-        // 等待 before 完成，然后执行 processSync
-        return before
-                .then(Mono.fromCallable(() -> processSync(exchange, apiContext)))
-                .onErrorMap(e -> new ServiceException("Process failed")); // 异常处理
+        apiContext.httpMethod = apiContext.method.getAnnotation(HttpMethod.class);
+        if (apiContext.httpMethod == null) {
+            //只起标记作用防止调到封闭方法了
+            apiContext.setServiceException(new ServiceException(CoreExceptionDefinition.LAUNCHER_API_NOT_EXISTS));
+            return apiContext;
+        }
+        apiContext.httpExcel = apiContext.method.getAnnotation(HttpExcel.class);
+        // 判断API URL是否正确
+        if ((apiContext.method.getReturnType() == Flux.class) && apiEntry != ApiEntry.SSE) {
+            apiContext.setServiceException(new ServiceException(CoreExceptionDefinition.LAUNCHER_ONLY_SSE_SUPPORT));
+            return apiContext;
+        }
+        if (apiContext.method.getReturnType() == WsWrapper.class && apiEntry != ApiEntry.WS) {
+            apiContext.setServiceException(new ServiceException(CoreExceptionDefinition.LAUNCHER_ONLY_WS_SUPPORT));
+            return apiContext;
+        }
+        return apiContext;
     }
 
     /**

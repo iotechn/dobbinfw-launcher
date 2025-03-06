@@ -7,6 +7,6 @@ import reactor.core.publisher.Mono;
 
 public interface BeforeProcess {
 
-    public Mono<Void> before(ServerWebExchange exchange) throws ServiceException;
+    public Mono<Void> before(ServerWebExchange exchange);
 
 }
