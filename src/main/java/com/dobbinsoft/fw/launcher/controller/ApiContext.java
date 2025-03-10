@@ -8,6 +8,7 @@ import com.dobbinsoft.fw.core.entiy.inter.IdentityOwner;
 import com.dobbinsoft.fw.core.entiy.inter.PermissionOwner;
 import com.dobbinsoft.fw.core.exception.CoreExceptionDefinition;
 import com.dobbinsoft.fw.core.exception.ServiceException;
+import com.dobbinsoft.fw.support.utils.CollectionUtils;
 import com.dobbinsoft.fw.support.utils.JacksonUtil;
 import com.dobbinsoft.fw.support.utils.RequestUtils;
 import com.dobbinsoft.fw.support.utils.StringUtils;
@@ -17,14 +18,18 @@ import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.codec.multipart.FilePart;
+import org.springframework.http.codec.multipart.FormFieldPart;
+import org.springframework.http.codec.multipart.Part;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.server.ServerWebExchange;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
 
 public class ApiContext {
 
@@ -36,10 +41,12 @@ public class ApiContext {
     // 私有化这个两个对象，对外提供代理接口
     @Setter
     @Getter
-    private Map<String, String[]> parameterMap;
-    @Setter
+    private Map<String, String> parameterMap;
+
+    // 客户端上传上来的文件
     @Getter
-    private Map<String, String> parameterSingleMap;
+    @Setter
+    private Map<String, byte[]> fileMap;
 
     @Getter
     @Setter
@@ -60,25 +67,11 @@ public class ApiContext {
     private CustomAccountOwner custom;
 
     public String requestLogMap() {
-        if (parameterMap != null) {
-            return JacksonUtil.toJSONString(parameterMap);
-        } else if (parameterSingleMap != null) {
-            return JacksonUtil.toJSONString(parameterSingleMap);
-        }
-        return "";
+        return JacksonUtil.toJSONString(parameterMap);
     }
 
     public String getParameter(String param) {
-        if (parameterMap != null) {
-            String[] strings = parameterMap.get(param);
-            if (strings != null && strings.length > 0) {
-                return strings[0];
-            }
-        } else if (parameterSingleMap != null) {
-            return parameterSingleMap.get(param);
-        }
-
-        return null;
+        return parameterMap.get(param);
     }
 
 
@@ -109,13 +102,12 @@ public class ApiContext {
                                 }
                             });
                         }
-                        apiContext.setParameterSingleMap(newMap);
+                        apiContext.setParameterMap(newMap);
                         apiContext.method = method;
                         return apiContext;
                     });
         } else if (StringUtils.isEmpty(contentType)
-                || contentType.startsWith(MediaType.APPLICATION_FORM_URLENCODED_VALUE)
-                || contentType.startsWith(MediaType.MULTIPART_FORM_DATA_VALUE)) {
+                || contentType.startsWith(MediaType.APPLICATION_FORM_URLENCODED_VALUE)) {
             // GET请求时， contentType为null
             ApiContext apiContext = new ApiContext();
             MultiValueMap<String, String> temp = exchange.getRequest().getQueryParams();
@@ -123,10 +115,72 @@ public class ApiContext {
             temp.forEach((k, v) -> {
                 paramterSingleMap.put(k, v.getFirst());
             });
-            apiContext.setParameterSingleMap(paramterSingleMap);
+            apiContext.setParameterMap(paramterSingleMap);
             apiContext.method = method;
             contextMono = Mono.just(apiContext);
-        } else {
+        } else if (contentType.startsWith(MediaType.MULTIPART_FORM_DATA_VALUE)) {
+            // 如果是文件上传
+            contextMono = exchange.getMultipartData().flatMap(dataMap -> {
+                ApiContext apiContext = new ApiContext();
+                Set<String> keys = dataMap.keySet();
+
+                // 这里使用Mono来组合所有异步操作
+                List<Mono<byte[]>> fileProcessingMonos = new ArrayList<>();
+
+                Map<String, String> paramterSingleMap = new HashMap<>();
+                Map<String, byte[]> fileMap = new HashMap<>();
+                for (String key : keys) {
+                    List<Part> parts = dataMap.get(key);
+                    if (CollectionUtils.isEmpty(parts)) {
+                        continue;
+                    }
+                    Part first = parts.getFirst();
+
+                    if (first instanceof FilePart filePart) {
+                        String filename = filePart.filename();
+                        paramterSingleMap.put(key, filename);
+
+                        // 创建Mono处理文件内容，返回的内容会在后续操作中使用
+                        Flux<DataBuffer> contentFlux = filePart.content();
+                        Mono<List<DataBuffer>> contentListMono = contentFlux.collectList();
+                        Mono<byte[]> fileContentMono = contentListMono.map(dataBuffers -> {
+                                    // 合并所有DataBuffer为一个byte[]数组
+                                    int totalLength = dataBuffers.stream().mapToInt(DataBuffer::readableByteCount).sum();
+                                    byte[] content = new byte[totalLength];
+                                    int position = 0;
+
+                                    for (DataBuffer buffer : dataBuffers) {
+                                        int length = buffer.readableByteCount();
+                                        buffer.read(content, position, length);
+                                        position += length;
+                                    }
+                                    return content;
+                                });
+
+
+                        // 将文件处理Mono加入到异步操作的列表中
+                        fileProcessingMonos.add(fileContentMono
+                                .publishOn(Schedulers.boundedElastic())  // 将subscribe调度到弹性线程池
+                                .doOnSuccess(content -> {
+                                    // 在文件内容处理完成时更新fileMap
+                                    fileMap.put(key, content);
+                                }));
+
+
+                    } else if (first instanceof FormFieldPart formFieldPart){
+                        paramterSingleMap.put(key, formFieldPart.value());
+                    }
+                }
+
+                apiContext.method = method;
+                apiContext.setParameterMap(paramterSingleMap);
+                apiContext.setFileMap(fileMap);
+                // 确保所有的文件处理都完成后再返回apiContext
+                return Mono.when(fileProcessingMonos) // 等待所有异步文件处理完成
+                        .thenReturn(apiContext);
+            });
+        }
+         else {
             ApiContext apiContext = new ApiContext();
             apiContext.method = method;
             apiContext.setServiceException(new ServiceException(CoreExceptionDefinition.LAUNCHER_CONTENT_TYPE_NOT_SUPPORT));

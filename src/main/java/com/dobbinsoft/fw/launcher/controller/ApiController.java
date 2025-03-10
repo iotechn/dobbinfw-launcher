@@ -40,18 +40,16 @@ import org.slf4j.event.Level;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.web.ServerProperties;
 import org.springframework.context.ApplicationContext;
-import org.springframework.core.io.buffer.DataBuffer;
-import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.util.MultiValueMap;
 import org.springframework.util.ObjectUtils;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Constructor;
@@ -602,7 +600,7 @@ public class ApiController {
             String _mt = apiContext._mt;
             HttpMethod httpMethod = apiContext.httpMethod;
 
-            logger.info("[HTTP] Q={}", JacksonUtil.toJSONString(apiContext.getParameterMap() == null ? apiContext.getParameterSingleMap() : apiContext.getParameterMap()));
+            logger.info("[HTTP] Q={}", JacksonUtil.toJSONString(apiContext.getParameterMap()));
             HttpHeaders headers = exchange.getRequest().getHeaders();
             String permission = httpMethod.permission();
             if (StringUtils.isNotEmpty(permission)) {
@@ -748,41 +746,31 @@ public class ApiController {
                     }
                 } else if (httpParam.type() == HttpParamType.FILE) {
                     // 读文件
-//                    if (request instanceof MultipartHttpServletRequest multipartHttpServletRequest) {
-//                        MultipartFile file = multipartHttpServletRequest.getFile(httpParam.name());
-//                        if (file != null) {
-//                            try (InputStream inputStream = file.getInputStream()) {
-//                                byte[] bytes = StreamUtils.copyToByteArray(inputStream);
-//                                args[i] = bytes;
-//                            }
-//                        }
-//                    } else {
-//                    }
-                    throw new ServiceException(CoreExceptionDefinition.LAUNCHER_READ_FILE_JUST_SUPPORT_MULTIPART);
+                    Map<String, byte[]> fileMap = apiContext.getFileMap();
+                    if (CollectionUtils.isEmpty(fileMap)) {
+                        throw new ServiceException(CoreExceptionDefinition.PARAM_CHECK_FAILED);
+                    }
+                    byte[] bytes = fileMap.get(httpParam.name());
+                    args[i] = bytes;
                 } else if (httpParam.type() == HttpParamType.FILE_NAME) {
-//                    if (request instanceof MultipartHttpServletRequest multipartHttpServletRequest) {
-//                        String name = httpParam.name();
-//                        MultipartFile file = multipartHttpServletRequest.getFile(httpParam.name().substring(0, name.length() - 4));
-//                        String originalFilename = file.getOriginalFilename();
-//                        args[i] = originalFilename;
-//                    } else {
-//                    }
-                    throw new ServiceException(CoreExceptionDefinition.LAUNCHER_READ_FILE_JUST_SUPPORT_MULTIPART);
+                    String fileName = apiContext.getParameter(httpParam.name());
+                    args[i] = fileName;
                 } else if (httpParam.type() == HttpParamType.EXCEL) {
                     // 读Excel
-//                    if (request instanceof MultipartHttpServletRequest multipartHttpServletRequest) {
-//                        MultipartFile file = multipartHttpServletRequest.getFile(httpParam.name());
-//                        List<?> list = null;
-//                        try {
-//                            list = ExcelUtils.importExcel(file, httpParam.arrayClass());
-//                        } catch (RuntimeException e) {
-//                            logger.error("[导入Excel] 异常", e);
-//                            throw new ServiceException(e.getMessage());
-//                        }
-//                        args[i] = list;
-//                    } else {
-//                    }
-                    throw new ServiceException(CoreExceptionDefinition.LAUNCHER_READ_FILE_JUST_SUPPORT_MULTIPART);
+                    Map<String, byte[]> fileMap = apiContext.getFileMap();
+                    if (CollectionUtils.isEmpty(fileMap)) {
+                        throw new ServiceException(CoreExceptionDefinition.PARAM_CHECK_FAILED);
+                    }
+                    byte[] bytes = fileMap.get(httpParam.name());
+                    if (bytes != null) {
+                        try {
+                            String fileName = apiContext.getParameter(httpParam.name());
+                            args[i] = ExcelUtils.importExcel(new ByteArrayInputStream(bytes), fileName, httpParam.arrayClass());
+                        } catch (RuntimeException e) {
+                            logger.error("[导入Excel] 异常", e);
+                            throw new ServiceException(e.getMessage());
+                        }
+                    }
                 }
                 if (args[i] == null) {
                     NotNull annotation = methodParam.getAnnotation(NotNull.class);
