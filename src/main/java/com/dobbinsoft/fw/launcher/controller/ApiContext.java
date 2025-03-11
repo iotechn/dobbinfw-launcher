@@ -31,6 +31,8 @@ import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
+@Getter
+@Setter
 public class ApiContext {
 
     Method method;
@@ -38,41 +40,13 @@ public class ApiContext {
     String _mt;
     HttpMethod httpMethod;
     HttpExcel httpExcel;
-    // 私有化这个两个对象，对外提供代理接口
-    @Setter
-    @Getter
     private Map<String, String> parameterMap;
-
-    // 客户端上传上来的文件
-    @Getter
-    @Setter
     private Map<String, byte[]> fileMap;
-
-    @Getter
-    @Setter
     private ServiceException serviceException;
-
     // WebFlux 中在findContext时，就把当前登录用户给找出来。process时直接使用即可
-
-    @Getter
-    @Setter
     private PermissionOwner admin;
-
-    @Getter
-    @Setter
     private IdentityOwner user;
-
-    @Getter
-    @Setter
     private CustomAccountOwner custom;
-
-    public String requestLogMap() {
-        return JacksonUtil.toJSONString(parameterMap);
-    }
-
-    public String getParameter(String param) {
-        return parameterMap.get(param);
-    }
 
 
     public static Mono<ApiContext> getApiContextMono(ServerWebExchange exchange, HttpHeaders headers, Method method) {

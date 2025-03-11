@@ -33,6 +33,8 @@ import com.dobbinsoft.fw.support.utils.excel.ExcelUtils;
 import com.dobbinsoft.fw.support.ws.WsPublisher;
 import com.dobbinsoft.fw.support.ws.event.WsEventReceiver;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
+import lombok.extern.slf4j.Slf4j;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -45,9 +47,14 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.ObjectUtils;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.reactive.socket.HandshakeInfo;
+import org.springframework.web.reactive.socket.WebSocketHandler;
+import org.springframework.web.reactive.socket.WebSocketMessage;
+import org.springframework.web.reactive.socket.WebSocketSession;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -67,14 +74,16 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
  * API Controller，RPC/WEB 调用流量入口。统一的方法路由，参数校验等逻辑。
  */
+@Slf4j
 @RestController
 @RequestMapping("/")
-public class ApiController {
+public class ApiController implements WebSocketHandler {
 
     private static final Logger logger = LoggerFactory.getLogger(ApiController.class);
 
@@ -126,6 +135,158 @@ public class ApiController {
     private static final String WS_CURRENT_IDENTITY_OWNER_KEY = "WS_CURRENT_IDENTITY_OWNER_KEY";
 
     private static final Pattern URI_PATTERN = Pattern.compile("/ws\\.api/([^/]+)/([^/]+)");
+
+    @Override
+    public Mono<Void> handle(WebSocketSession session) {
+//        // 解析路径参数
+        HandshakeInfo handshakeInfo = session.getHandshakeInfo();
+        String requestURI = handshakeInfo.getUri().toString();
+        if (serverProperties.getServlet() != null &&
+                StringUtils.isNotEmpty(serverProperties.getServlet().getContextPath())) {
+            requestURI = requestURI.substring(serverProperties.getServlet().getContextPath().length());
+        }
+        Matcher matcher = URI_PATTERN.matcher(requestURI);
+        String _gp = null;
+        String _mt = null;
+        if (matcher.matches()) {
+            // 提取路径参数
+            _gp = matcher.group(1); // 第一个路径参数
+            _mt = matcher.group(2); // 第二个路径参数
+        }
+        if (StringUtils.isAllEmpty(_gp, _mt)) {
+            return session.close();
+        }
+        return findContextWs(handshakeInfo, _gp, _mt)
+                .flatMap(apiContext -> {
+                    Object obj;
+                    try {
+                        obj = processSync(handshakeInfo.getHeaders(), RequestUtils.getWsClientIp(handshakeInfo), apiContext);
+                    } catch (ServiceException e) {
+                        return Mono.error(e);
+                    }
+                    if (!(obj instanceof WsWrapper)) {
+                        return session.close();
+                    }
+                    // 鉴权 & 握手完成， 后续进入afterConnectionEstablished方法
+                    String identityOwnerKey = ((WsWrapper) obj).getIdentityOwnerKey();
+                    handshakeInfo.getAttributes().put(WS_CURRENT_IDENTITY_OWNER_KEY, identityOwnerKey);
+                    wsPublisher.join(identityOwnerKey, session).subscribe();
+                    return session.send(
+                            session.receive()
+                                    .flatMap(message -> {
+                                        if (message.getType().equals(WebSocketMessage.Type.TEXT)) {
+                                            // 处理文本消息
+                                            String payload = message.getPayloadAsText();
+                                            // ...
+                                            JsonNode jsonNode = JacksonUtil.parseObject(payload);
+                                            JsonNode eventTypeObj = jsonNode.get("eventType");
+                                            if (eventTypeObj == null) {
+                                                logger.info("[WS] Event 报文格式不正确 event: {}", payload);
+                                            } else {
+                                                String eventType = eventTypeObj.asText();
+                                                wsEventReceiver.route(eventType, payload);
+                                            }
+                                        } else if (message.getType().equals(WebSocketMessage.Type.BINARY)) {
+                                            // 处理二进制消息
+                                            // ...
+                                            logger.info("[WS] Session 仅支持text报文, session id: {}", session.getId());
+                                        } else if (message.getType().equals(WebSocketMessage.Type.PING)) {
+                                            // 处理PING消息
+                                            // ...
+                                            log.info("WebSocket Ping");
+                                        } else if (message.getType().equals(WebSocketMessage.Type.PONG)) {
+                                            // 处理PONG消息
+                                            // ...
+                                            log.info("WebSocket Pong");
+                                        }
+                                        return Mono.empty();
+                                    })
+                    ).then();
+                })
+                .onErrorResume(e -> {
+                    // 全局错误处理
+                    if (!(e instanceof ServiceException)) {
+                        log.error("[WS连接] 出现异常", e);
+                    }
+                    return session.close();
+                });
+    }
+
+    /**
+     * 获取WS调用上下文
+     * <p>
+     * 主要做的工作： 1. 获取session 2. 封装参数Map
+     *
+     * @param handshakeInfo
+     * @param _gp
+     * @param _mt
+     * @return
+     */
+    private Mono<ApiContext> findContextWs(HandshakeInfo handshakeInfo, String _gp, String _mt) {
+        Method method = apiManager.getMethod(_gp, _mt);
+        // 1. 获取参数
+        ApiContext apiContext = new ApiContext();
+        apiContext.setMethod(method);
+        apiContext.set_gp(_gp);
+        apiContext.set_mt(_mt);
+        apiContext.setParameterMap(RequestUtils.extractQueryParams(handshakeInfo.getUri()));
+        // 2. 尝试获取Session
+        Mono<? extends IdentityOwner> identityMono = null;
+        Parameter[] parameters = method.getParameters();
+        HttpHeaders headers = handshakeInfo.getHeaders();
+        HttpParamType identityType = null;
+        try {
+            // TODO 解决冗余代码
+            for (Parameter parameter : parameters) {
+                HttpParam httpParam = parameter.getAnnotation(HttpParam.class);
+                if (httpParam.type() == HttpParamType.ADMIN_ID) {
+                    String accessToken = RequestUtils.getHeaderValue(headers, Const.ADMIN_ACCESS_TOKEN);
+                    identityMono = adminAuthenticator.getAdmin(accessToken);
+                    identityType = HttpParamType.ADMIN_ID;
+                    break;
+                } else if (httpParam.type() == HttpParamType.USER_ID) {
+                    String accessToken = RequestUtils.getHeaderValue(headers, Const.USER_ACCESS_TOKEN);
+                    identityMono = userAuthenticator.getUser(accessToken);
+                    identityType = HttpParamType.USER_ID;
+                    break;
+                } else if (httpParam.type() == HttpParamType.CUSTOM_ACCOUNT_ID) {
+                    Class clazz = httpParam.customAccountClass();
+                    String simpleName = clazz.getSimpleName();
+                    String header = simpleName.replace("DO", "").replace("DTO", "");
+                    String accessToken = RequestUtils.getHeaderValue(headers, header.toUpperCase() + "TOKEN");
+                    identityMono = customAuthenticator.getCustom(clazz, accessToken);
+                    identityType = HttpParamType.CUSTOM_ACCOUNT_ID;
+                    break;
+                }
+            }
+        } catch (ServiceException e) {
+            return Mono.error(e);
+        }
+        if (identityType == null) {
+            // 无需登录的开放接口，则不需要等待读取redis
+            return Mono.just(apiContext);
+        }
+        HttpParamType finalIdentityType = identityType;
+        return identityMono.switchIfEmpty(Mono.defer(() -> {
+            switch (finalIdentityType) {
+                case ADMIN_ID, CUSTOM_ACCOUNT_ID -> {
+                    return Mono.error(new ServiceException(CoreExceptionDefinition.LAUNCHER_ADMIN_NOT_LOGIN));
+                }
+                case USER_ID -> {
+                    return Mono.error(new ServiceException(CoreExceptionDefinition.LAUNCHER_USER_NOT_LOGIN));
+                }
+            }
+            return Mono.empty();
+        })).flatMap(identityOwner -> {
+            switch (finalIdentityType) {
+                case ADMIN_ID -> apiContext.setAdmin((PermissionOwner) identityOwner);
+                case USER_ID -> apiContext.setUser(identityOwner);
+                case CUSTOM_ACCOUNT_ID -> apiContext.setCustom((CustomAccountOwner) identityOwner);
+            }
+            return Mono.just(apiContext);
+        });
+    }
+
 
 //    @Override
 //    public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
@@ -298,7 +459,7 @@ public class ApiController {
                         return Flux.error(context.getServiceException());
                     }
                     try {
-                        Object result = processSync(exchange, context);
+                        Object result = processSync(exchange.getRequest().getHeaders(), RequestUtils.getClientIp(exchange.getRequest()), context);
                         if (result instanceof Flux<?>) {
                             return (Flux<?>) result;
                         } else {
@@ -353,7 +514,7 @@ public class ApiController {
             }
             Object obj;
             try {
-                obj = processSync(exchange, context);
+                obj = processSync(exchange.getRequest().getHeaders(), RequestUtils.getClientIp(exchange.getRequest()), context);
             } catch (ServiceException e) {
                 return Mono.error(e);
             }
@@ -587,12 +748,13 @@ public class ApiController {
     /**
      * 调用HttpMethod
      *
-     * @param exchange
+     * @param headers
+     * @param ip
      * @param apiContext
      * @return 返回HttpMethod原始返回
      * @throws ServiceException
      */
-    private Object processSync(ServerWebExchange exchange, ApiContext apiContext) throws ServiceException {
+    private Object processSync(HttpHeaders headers, String ip, ApiContext apiContext) throws ServiceException {
         try {
             IApiManager apiManager = applicationContext.getBean(IApiManager.class);
             Method method = apiContext.method;
@@ -601,7 +763,6 @@ public class ApiController {
             HttpMethod httpMethod = apiContext.httpMethod;
 
             logger.info("[HTTP] Q={}", JacksonUtil.toJSONString(apiContext.getParameterMap()));
-            HttpHeaders headers = exchange.getRequest().getHeaders();
             String permission = httpMethod.permission();
             if (StringUtils.isNotEmpty(permission)) {
                 //若需要权限，则校验当前用户是否具有权限
@@ -625,7 +786,6 @@ public class ApiController {
             Object[] args = new Object[methodParameters.length];
             // 用户或管理员的ID，用于限流
             Long personId = null;
-            String ip = RequestUtils.getClientIp(exchange.getRequest());
             for (int i = 0; i < methodParameters.length; i++) {
                 Parameter methodParam = methodParameters[i];
                 HttpParam httpParam = methodParam.getAnnotation(HttpParam.class);
@@ -633,7 +793,7 @@ public class ApiController {
                     throw new ServiceException(CoreExceptionDefinition.LAUNCHER_API_NOT_EXISTS);
                 }
                 if (httpParam.type() == HttpParamType.COMMON) {
-                    String value = apiContext.getParameter(httpParam.name());
+                    String value = apiContext.getParameterMap().get(httpParam.name());
                     if (StringUtils.isEmpty(value) && StringUtils.isNotEmpty(httpParam.valueDef())) {
                         value = httpParam.valueDef();
                     }
@@ -753,7 +913,7 @@ public class ApiController {
                     byte[] bytes = fileMap.get(httpParam.name());
                     args[i] = bytes;
                 } else if (httpParam.type() == HttpParamType.FILE_NAME) {
-                    String fileName = apiContext.getParameter(httpParam.name());
+                    String fileName = apiContext.getParameterMap().get(httpParam.name());
                     args[i] = fileName;
                 } else if (httpParam.type() == HttpParamType.EXCEL) {
                     // 读Excel
@@ -764,7 +924,7 @@ public class ApiController {
                     byte[] bytes = fileMap.get(httpParam.name());
                     if (bytes != null) {
                         try {
-                            String fileName = apiContext.getParameter(httpParam.name());
+                            String fileName = apiContext.getParameterMap().get(httpParam.name());
                             args[i] = ExcelUtils.importExcel(new ByteArrayInputStream(bytes), fileName, httpParam.arrayClass());
                         } catch (RuntimeException e) {
                             logger.error("[导入Excel] 异常", e);
@@ -824,7 +984,7 @@ public class ApiController {
                     throw (ServiceException) targetException;
                 }
             }
-            logger.error("[HTTP] R={}", apiContext.requestLogMap());
+            logger.error("[HTTP] R={}", JacksonUtil.toJSONString(apiContext.getParameterMap()));
             Class<? extends Throwable> clazz = target.getClass();
             OtherExceptionTransfer transfer = otherExceptionTransferHolder.getByClass(clazz);
             ServiceException afterTransServiceException = transfer.trans(target);
