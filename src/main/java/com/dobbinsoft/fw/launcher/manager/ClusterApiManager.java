@@ -218,7 +218,7 @@ public class ClusterApiManager implements InitializingBean, ApplicationContextAw
         if (!hasChild) {
             //添加child
             PermissionPoint childDTO = new PermissionPoint();
-            childDTO.setId(httpMethod.permissionName());
+            childDTO.setId(httpMethod.permissionParentName() + "-" + httpMethod.permissionName());
             childDTO.setLabel(httpMethod.permissionName());
             childDTO.setChildren(new LinkedList<>());
             parentDTO.getChildren().add(childDTO);
