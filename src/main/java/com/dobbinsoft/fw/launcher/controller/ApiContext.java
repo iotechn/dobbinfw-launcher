@@ -14,6 +14,7 @@ public class ApiContext {
     Method method;
     String _gp;
     String _mt;
+    ApiEntry entry;
     HttpMethod httpMethod;
     HttpExcel httpExcel;
     // 私有化这个两个对象，对外提供代理接口

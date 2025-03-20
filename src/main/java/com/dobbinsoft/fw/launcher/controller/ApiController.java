@@ -509,6 +509,7 @@ public class ApiController implements WebSocketConfigurer, DefaultHandshakeInter
                 throw new ServiceException(CoreExceptionDefinition.LAUNCHER_API_NOT_EXISTS);
             }
         }
+        apiContext.entry = apiEntry;
         apiContext.method = apiEntry == ApiEntry.RPC ? apiManager.getRpcMethod(apiContext._gp, apiContext._mt) : apiManager.getMethod(apiContext._gp, apiContext._mt);
         if (apiContext.method == null) {
             throw new ServiceException(CoreExceptionDefinition.LAUNCHER_API_NOT_EXISTS);
@@ -650,6 +651,9 @@ public class ApiController implements WebSocketConfigurer, DefaultHandshakeInter
                     }
                 } else if (httpParam.type() == HttpParamType.USER_ID) {
                     String accessToken = request.getHeader(Const.USER_ACCESS_TOKEN);
+                    if (apiContext.entry == ApiEntry.WS && StringUtils.isEmpty(accessToken)) {
+                        accessToken = request.getParameter(Const.USER_ACCESS_TOKEN);
+                    }
                     IdentityOwner user = userAuthenticator.getUser(accessToken);
                     if (user != null) {
                         args[i] = user.getId();
@@ -662,6 +666,9 @@ public class ApiController implements WebSocketConfigurer, DefaultHandshakeInter
                     }
                 } else if (httpParam.type() == HttpParamType.ADMIN_ID) {
                     String accessToken = request.getHeader(Const.ADMIN_ACCESS_TOKEN);
+                    if (apiContext.entry == ApiEntry.WS && StringUtils.isEmpty(accessToken)) {
+                        accessToken = request.getParameter(Const.ADMIN_ACCESS_TOKEN);
+                    }
                     PermissionOwner adminDTO = adminAuthenticator.getAdmin(accessToken);
                     if (adminDTO != null) {
                         sessionUtil.setAdmin(adminDTO);
@@ -681,6 +688,9 @@ public class ApiController implements WebSocketConfigurer, DefaultHandshakeInter
                     String simpleName = clazz.getSimpleName();
                     String header = simpleName.replace("DO", "").replace("DTO", "");
                     String accessToken = request.getHeader(header.toUpperCase() + "TOKEN");
+                    if (apiContext.entry == ApiEntry.WS && StringUtils.isEmpty(accessToken)) {
+                        accessToken = request.getParameter(header.toUpperCase() + "TOKEN");
+                    }
                     CustomAccountOwner custom = customAuthenticator.getCustom(clazz, accessToken);
                     if (custom != null) {
                         sessionUtil.setCustom(custom);
