@@ -138,9 +138,13 @@ public class ApiController implements WebSocketHandler {
 
     @Override
     public Mono<Void> handle(WebSocketSession session) {
+        if (this.wsPublisher == null) {
+            log.error("[WS] 未开启Websocket");
+            return Mono.empty();
+        }
 //        // 解析路径参数
         HandshakeInfo handshakeInfo = session.getHandshakeInfo();
-        String requestURI = handshakeInfo.getUri().toString();
+        String requestURI = handshakeInfo.getUri().getPath();
         if (serverProperties.getServlet() != null &&
                 StringUtils.isNotEmpty(serverProperties.getServlet().getContextPath())) {
             requestURI = requestURI.substring(serverProperties.getServlet().getContextPath().length());
@@ -169,7 +173,6 @@ public class ApiController implements WebSocketHandler {
                     }
                     // 鉴权 & 握手完成， 后续进入afterConnectionEstablished方法
                     String identityOwnerKey = ((WsWrapper) obj).getIdentityOwnerKey();
-                    handshakeInfo.getAttributes().put(WS_CURRENT_IDENTITY_OWNER_KEY, identityOwnerKey);
                     wsPublisher.join(identityOwnerKey, session).subscribe();
                     return session.send(
                             session.receive()
@@ -230,6 +233,7 @@ public class ApiController implements WebSocketHandler {
         apiContext.set_gp(_gp);
         apiContext.set_mt(_mt);
         apiContext.setParameterMap(RequestUtils.extractQueryParams(handshakeInfo.getUri()));
+        apiContext.setHttpMethod(method.getAnnotation(HttpMethod.class));
         // 2. 尝试获取Session
         Mono<? extends IdentityOwner> identityMono = null;
         Parameter[] parameters = method.getParameters();
