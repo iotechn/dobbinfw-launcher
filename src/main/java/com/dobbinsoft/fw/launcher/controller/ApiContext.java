@@ -28,6 +28,7 @@ import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 import java.lang.reflect.Method;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
@@ -89,9 +90,27 @@ public class ApiContext {
             temp.forEach((k, v) -> {
                 paramterSingleMap.put(k, v.getFirst());
             });
+
             apiContext.setParameterMap(paramterSingleMap);
             apiContext.method = method;
-            contextMono = Mono.just(apiContext);
+            if (StringUtils.isNotEmpty(contentType)) {
+                // 读流
+                contextMono = exchange.getRequest().getBody()
+                        .reduce(DataBuffer::write)
+                        .map(dataBuffer -> {
+                            byte[] bytes = new byte[dataBuffer.readableByteCount()];
+                            dataBuffer.read(bytes);
+                            DataBufferUtils.release(dataBuffer);
+                            String requestBody = new String(bytes, StandardCharsets.UTF_8);
+                            // 解析后将参数放入 paramterSingleMap
+                            Map<String, String> map = decodeFormData(requestBody);
+                            paramterSingleMap.putAll(map);
+                            return apiContext;
+                        });
+            } else {
+                contextMono = Mono.just(apiContext);
+            }
+
         } else if (contentType.startsWith(MediaType.MULTIPART_FORM_DATA_VALUE)) {
             // 如果是文件上传
             contextMono = exchange.getMultipartData().flatMap(dataMap -> {
@@ -161,6 +180,22 @@ public class ApiContext {
             contextMono = Mono.just(apiContext);
         }
         return contextMono;
+    }
+
+    // 解码 x-www-form-urlencoded 格式的表单数据
+    private static Map<String, String> decodeFormData(String formData) {
+        Map<String, String> paramMap = new HashMap<>();
+        // 将表单数据分割成键值对
+        String[] pairs = formData.split("&");
+        for (String pair : pairs) {
+            String[] keyValue = pair.split("=");
+            if (keyValue.length == 2) {
+                String key = URLDecoder.decode(keyValue[0], StandardCharsets.UTF_8);
+                String value = URLDecoder.decode(keyValue[1], StandardCharsets.UTF_8);
+                paramMap.put(key, value);
+            }
+        }
+        return paramMap;
     }
 
 }

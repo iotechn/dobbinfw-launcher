@@ -35,6 +35,7 @@ import com.dobbinsoft.fw.support.ws.event.WsEventReceiver;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.extern.slf4j.Slf4j;
+import org.reactivestreams.Publisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -54,7 +55,6 @@ import org.springframework.web.reactive.socket.WebSocketSession;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -74,6 +74,7 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -409,23 +410,7 @@ public class ApiController implements WebSocketHandler {
             @PathVariable(required = false) String _gp,
             @PathVariable(required = false) String _mt) throws IOException {
         try {
-            HttpHeaders headers = exchange.getRequest().getHeaders();
-            // Valid rpc token
-            String jwtToken = RequestUtils.getHeaderValue(headers, Const.RPC_HEADER);
-            String systemId = RequestUtils.getHeaderValue(headers, Const.RPC_SYSTEM_ID);
-            if (rpcProviderUtils == null) {
-                logger.error("[RPC] You need to add @EnableRpc");
-            }
-            JwtUtils.JwtResult jwtResult = rpcProviderUtils.validToken(systemId, jwtToken);
-            if (jwtResult.getResult() != JwtUtils.Result.SUCCESS) {
-                throw new ServiceException(CoreExceptionDefinition.LAUNCHER_RPC_SIGN_INCORRECT);
-            }
-            String rpcContextJson = RequestUtils.getHeaderValue(headers, Const.RPC_CONTEXT_JSON);
-            if (StringUtils.isNotEmpty(rpcContextJson)) {
-                Map<String, String> rpcContexts = JacksonUtil.parseObject(rpcContextJson, new TypeReference<Map<String, String>>() {
-                });
-                rpcContexts.forEach(RpcContextHolder::add);
-            }
+            validRpcAndPutContext(exchange);
             return commonsInvoke(exchange, _gp, _mt, ApiEntry.RPC);
         } catch (ServiceException e) {
             byte[] result = buildServiceResult(exchange, System.currentTimeMillis(), e).getBytes(StandardCharsets.UTF_8);
@@ -435,6 +420,63 @@ public class ApiController implements WebSocketHandler {
         }
 
     }
+
+    /**
+     * 远程调用时 接口地址， 通常nginx配置时不暴露
+     *
+     * @param exchange
+     * @param _gp
+     * @param _mt
+     * @throws IOException
+     */
+    @RequestMapping(
+            value = {"/rpc-sse", "/rpc-sse/{_gp}/{_mt}"},
+            method = {RequestMethod.POST, RequestMethod.GET},
+            produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<?> rpcSseInvoke(
+            ServerWebExchange exchange,
+            @PathVariable(required = false) String _gp,
+            @PathVariable(required = false) String _mt) throws Exception {
+        validRpcAndPutContext(exchange);
+        // 获取请求上下文
+        return this.findContext(exchange, StringUtils.firstNonEmpty(_gp), StringUtils.firstNonEmpty(_mt), ApiEntry.RPC)
+                .flatMapMany(sseMapMany(exchange))
+                .onErrorResume(e -> {
+                    // 全局错误处理
+                    if (e instanceof ServiceException) {
+                        return Flux.error(e);
+                    } else {
+                        return Flux.error(new ServiceException(CoreExceptionDefinition.LAUNCHER_UNKNOWN_EXCEPTION));
+                    }
+                });
+
+    }
+
+    private Function<ApiContext, Publisher<?>> sseMapMany(ServerWebExchange exchange) {
+        return context -> {
+            // 如果上下文中有异常，直接返回错误
+            if (context.getServiceException() != null) {
+                return Flux.error(context.getServiceException());
+            }
+            try {
+                Object result = processSync(exchange.getRequest().getHeaders(), RequestUtils.getClientIp(exchange.getRequest()), context);
+                if (result instanceof Flux<?>) {
+                    return (Flux<?>) result;
+                } else {
+                    // 如果不是 Flux，返回错误
+                    return Flux.error(new ServiceException(CoreExceptionDefinition.LAUNCHER_SSE_ONLY_RETURN_FLUX));
+                }
+            } catch (ServiceException e) {
+                // 捕获 ServiceException 并返回错误
+                return Flux.error(e);
+            } catch (Exception e) {
+                // 捕获其他异常并返回错误
+                logger.error("[SSE 系统未知异常]", e);
+                return Flux.error(new ServiceException(CoreExceptionDefinition.LAUNCHER_UNKNOWN_EXCEPTION));
+            }
+        };
+    }
+
 
     /**
      * sse 请求时地址，返回的content-type为text/event-stream
@@ -457,28 +499,7 @@ public class ApiController implements WebSocketHandler {
             @RequestParam(required = false, name = "_mt") String _mtParam) {
         // 获取请求上下文
         return this.findContext(exchange, StringUtils.firstNonEmpty(_gp, _gpParam), StringUtils.firstNonEmpty(_mt, _mtParam), ApiEntry.SSE)
-                .flatMapMany(context -> {
-                    // 如果上下文中有异常，直接返回错误
-                    if (context.getServiceException() != null) {
-                        return Flux.error(context.getServiceException());
-                    }
-                    try {
-                        Object result = processSync(exchange.getRequest().getHeaders(), RequestUtils.getClientIp(exchange.getRequest()), context);
-                        if (result instanceof Flux<?>) {
-                            return (Flux<?>) result;
-                        } else {
-                            // 如果不是 Flux，返回错误
-                            return Flux.error(new ServiceException(CoreExceptionDefinition.LAUNCHER_SSE_ONLY_RETURN_FLUX));
-                        }
-                    } catch (ServiceException e) {
-                        // 捕获 ServiceException 并返回错误
-                        return Flux.error(e);
-                    } catch (Exception e) {
-                        // 捕获其他异常并返回错误
-                        logger.error("[SSE 系统未知异常]", e);
-                        return Flux.error(new ServiceException(CoreExceptionDefinition.LAUNCHER_UNKNOWN_EXCEPTION));
-                    }
-                })
+                .flatMapMany(sseMapMany(exchange))
                 .onErrorResume(e -> {
                     // 全局错误处理
                     if (e instanceof ServiceException) {
@@ -653,7 +674,11 @@ public class ApiController implements WebSocketHandler {
         return before.then(Mono.defer(() -> {
             HttpHeaders headers = exchange.getRequest().getHeaders();
             Method method = apiEntry == ApiEntry.RPC ? apiManager.getRpcMethod(_gp, _mt) : apiManager.getMethod(_gp, _mt);
-
+            if (method == null) {
+                ApiContext apiContext = new ApiContext();
+                apiContext.setServiceException(new ServiceException(CoreExceptionDefinition.LAUNCHER_API_NOT_EXISTS));
+                return Mono.just(apiContext);
+            }
             // 1. 获取Context
             Mono<ApiContext> contextMono = ApiContext.getApiContextMono(exchange, headers, method);
 
@@ -738,7 +763,7 @@ public class ApiController implements WebSocketHandler {
         }
         apiContext.httpExcel = apiContext.method.getAnnotation(HttpExcel.class);
         // 判断API URL是否正确
-        if ((apiContext.method.getReturnType() == Flux.class) && apiEntry != ApiEntry.SSE) {
+        if ((apiContext.method.getReturnType() == Flux.class) && apiEntry != ApiEntry.SSE && apiEntry != ApiEntry.RPC) {
             apiContext.setServiceException(new ServiceException(CoreExceptionDefinition.LAUNCHER_ONLY_SSE_SUPPORT));
             return apiContext;
         }
@@ -1022,6 +1047,31 @@ public class ApiController implements WebSocketHandler {
         gatewayResponse.setErrmsg(e.getMessage());
         gatewayResponse.setData(e.getAttach());
         return afterPost(exchange, invokeTime, gatewayResponse, true, false);
+    }
+
+    /**
+     * 校验SSE签名，并封装RPC上下文
+     * @param exchange
+     * @throws ServiceException
+     */
+    private void validRpcAndPutContext(ServerWebExchange exchange) throws ServiceException {
+        HttpHeaders headers = exchange.getRequest().getHeaders();
+        // Valid rpc token
+        String jwtToken = RequestUtils.getHeaderValue(headers, Const.RPC_HEADER);
+        String systemId = RequestUtils.getHeaderValue(headers, Const.RPC_SYSTEM_ID);
+        if (rpcProviderUtils == null) {
+            logger.error("[RPC] You need to add @EnableRpc");
+        }
+        JwtUtils.JwtResult jwtResult = rpcProviderUtils.validToken(systemId, jwtToken);
+        if (jwtResult.getResult() != JwtUtils.Result.SUCCESS) {
+            throw new ServiceException(CoreExceptionDefinition.LAUNCHER_RPC_SIGN_INCORRECT);
+        }
+        String rpcContextJson = RequestUtils.getHeaderValue(headers, Const.RPC_CONTEXT_JSON);
+        if (StringUtils.isNotEmpty(rpcContextJson)) {
+            Map<String, String> rpcContexts = JacksonUtil.parseObject(rpcContextJson, new TypeReference<Map<String, String>>() {
+            });
+            rpcContexts.forEach(RpcContextHolder::add);
+        }
     }
 
 }
