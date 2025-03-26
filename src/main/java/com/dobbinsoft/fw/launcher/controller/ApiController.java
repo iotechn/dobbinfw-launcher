@@ -446,6 +446,7 @@ public class ApiController implements WebSocketHandler {
                     if (e instanceof ServiceException) {
                         return Flux.error(e);
                     } else {
+                        log.error("[SSE RPC] 系统未知异常", e);
                         return Flux.error(new ServiceException(CoreExceptionDefinition.LAUNCHER_UNKNOWN_EXCEPTION));
                     }
                 });
@@ -505,6 +506,7 @@ public class ApiController implements WebSocketHandler {
                     if (e instanceof ServiceException) {
                         return Flux.error(e);
                     } else {
+                        log.error("[SSE] 系统未知异常", e);
                         return Flux.error(new ServiceException(CoreExceptionDefinition.LAUNCHER_UNKNOWN_EXCEPTION));
                     }
                 });
@@ -675,6 +677,7 @@ public class ApiController implements WebSocketHandler {
             HttpHeaders headers = exchange.getRequest().getHeaders();
             Method method = apiEntry == ApiEntry.RPC ? apiManager.getRpcMethod(_gp, _mt) : apiManager.getMethod(_gp, _mt);
             if (method == null) {
+                log.info("[网关] ApiEntry:{}, _gp:{}, _mt:{}", apiEntry.name(), _gp, _mt);
                 ApiContext apiContext = new ApiContext();
                 apiContext.setServiceException(new ServiceException(CoreExceptionDefinition.LAUNCHER_API_NOT_EXISTS));
                 return Mono.just(apiContext);

@@ -15,6 +15,7 @@ import com.dobbinsoft.fw.support.utils.StringUtils;
 import lombok.Getter;
 import lombok.Setter;
 import org.springframework.core.io.buffer.DataBuffer;
+import org.springframework.core.io.buffer.DataBufferFactory;
 import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -56,11 +57,22 @@ public class ApiContext {
         String contentType = RequestUtils.getHeaderValue(headers, HttpHeaders.CONTENT_TYPE);
         if (MediaType.APPLICATION_JSON_VALUE.equals(contentType)) {
             contextMono = exchange.getRequest().getBody()
-                    .reduce(DataBuffer::write)
                     .map(dataBuffer -> {
                         byte[] bytes = new byte[dataBuffer.readableByteCount()];
                         dataBuffer.read(bytes);
                         DataBufferUtils.release(dataBuffer);
+                        return bytes;
+                    })
+                    .reduce((b1, b2) -> {
+                        // 创建一个新的字节数组，大小是 b1 和 b2 长度之和
+                        byte[] merged = new byte[b1.length + b2.length];
+                        // 将 b1 内容复制到 merged
+                        System.arraycopy(b1, 0, merged, 0, b1.length);
+                        // 将 b2 内容复制到 merged
+                        System.arraycopy(b2, 0, merged, b1.length, b2.length);
+                        return merged;
+                    })
+                    .map(bytes -> {
                         ApiContext apiContext = new ApiContext();
                         Map<String, Object> map = JacksonUtil.toMap(new String(bytes, StandardCharsets.UTF_8), String.class, Object.class);
                         Map<String, String> newMap = new HashMap<>();
@@ -96,11 +108,22 @@ public class ApiContext {
             if (StringUtils.isNotEmpty(contentType)) {
                 // 读流
                 contextMono = exchange.getRequest().getBody()
-                        .reduce(DataBuffer::write)
                         .map(dataBuffer -> {
                             byte[] bytes = new byte[dataBuffer.readableByteCount()];
                             dataBuffer.read(bytes);
                             DataBufferUtils.release(dataBuffer);
+                            return bytes;
+                        })
+                        .reduce((b1, b2) -> {
+                            // 创建一个新的字节数组，大小是 b1 和 b2 长度之和
+                            byte[] merged = new byte[b1.length + b2.length];
+                            // 将 b1 内容复制到 merged
+                            System.arraycopy(b1, 0, merged, 0, b1.length);
+                            // 将 b2 内容复制到 merged
+                            System.arraycopy(b2, 0, merged, b1.length, b2.length);
+                            return merged;
+                        })
+                        .map(bytes -> {
                             String requestBody = new String(bytes, StandardCharsets.UTF_8);
                             // 解析后将参数放入 paramterSingleMap
                             Map<String, String> map = decodeFormData(requestBody);
