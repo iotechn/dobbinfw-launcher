@@ -712,17 +712,15 @@ public class ApiController implements WebSocketConfigurer, DefaultHandshakeInter
                         Constructor<?> constructor = type.getConstructor(String.class);
                         args[i] = constructor.newInstance(header);
                     } else {
-                        args[i] = header;
+                        args[i] = null;
                     }
                 } else if (httpParam.type() == HttpParamType.FILE) {
                     // 读文件
                     if (request instanceof MultipartHttpServletRequest multipartHttpServletRequest) {
                         MultipartFile file = multipartHttpServletRequest.getFile(httpParam.name());
-                        if (file != null) {
-                            try (InputStream inputStream = file.getInputStream()) {
-                                byte[] bytes = StreamUtils.copyToByteArray(inputStream);
-                                args[i] = bytes;
-                            }
+                        try (InputStream inputStream = file.getInputStream()) {
+                            byte[] bytes = StreamUtils.copyToByteArray(inputStream);
+                            args[i] = bytes;
                         }
                     } else {
                         throw new ServiceException(CoreExceptionDefinition.LAUNCHER_READ_FILE_JUST_SUPPORT_MULTIPART);
@@ -731,10 +729,8 @@ public class ApiController implements WebSocketConfigurer, DefaultHandshakeInter
                     if (request instanceof MultipartHttpServletRequest multipartHttpServletRequest) {
                         String name = httpParam.name();
                         MultipartFile file = multipartHttpServletRequest.getFile(httpParam.name().substring(0, name.length() - 4));
-                        if (file != null) {
-                            String originalFilename = file.getOriginalFilename();
-                            args[i] = originalFilename;
-                        }
+                        String originalFilename = file.getOriginalFilename();
+                        args[i] = originalFilename;
                     } else {
                         throw new ServiceException(CoreExceptionDefinition.LAUNCHER_READ_FILE_JUST_SUPPORT_MULTIPART);
                     }
