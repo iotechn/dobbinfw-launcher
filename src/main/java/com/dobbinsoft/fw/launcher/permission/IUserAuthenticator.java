@@ -6,6 +6,6 @@ import reactor.core.publisher.Mono;
 
 public interface IUserAuthenticator {
 
-    public Mono<? extends IdentityOwner> getUser(String accessToken) throws ServiceException;
+    public Mono<IdentityOwner> getUser(String accessToken);
 
 }

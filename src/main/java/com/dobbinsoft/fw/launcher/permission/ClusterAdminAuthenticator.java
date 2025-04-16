@@ -24,7 +24,7 @@ public class ClusterAdminAuthenticator implements IAdminAuthenticator {
     private FwSystemProperties fwSystemProperties;
 
     @Override
-    public Mono<PermissionOwner> getAdmin(String accessToken) throws ServiceException {
+    public Mono<PermissionOwner> getAdmin(String accessToken) {
         if (StringUtils.isEmpty(accessToken)) {
             return null;
         }

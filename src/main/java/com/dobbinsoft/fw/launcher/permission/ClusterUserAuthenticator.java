@@ -27,7 +27,7 @@ public class ClusterUserAuthenticator implements IUserAuthenticator {
     private FwSystemProperties fwSystemProperties;
 
     @Override
-    public Mono<IdentityOwner> getUser(String accessToken) throws ServiceException {
+    public Mono<IdentityOwner> getUser(String accessToken) {
         if (StringUtils.isEmpty(accessToken)) {
             return null;
         }

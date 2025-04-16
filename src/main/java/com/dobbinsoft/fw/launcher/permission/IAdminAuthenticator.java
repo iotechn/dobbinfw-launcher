@@ -6,6 +6,6 @@ import reactor.core.publisher.Mono;
 
 public interface IAdminAuthenticator {
 
-    public Mono<? extends PermissionOwner> getAdmin(String accessToken) throws ServiceException;
+    public Mono<PermissionOwner> getAdmin(String accessToken);
 
 }
