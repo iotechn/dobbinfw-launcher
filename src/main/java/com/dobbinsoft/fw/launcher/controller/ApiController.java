@@ -738,15 +738,12 @@ public class ApiController implements WebSocketConfigurer, DefaultHandshakeInter
                     // 读Excel
                     if (request instanceof MultipartHttpServletRequest multipartHttpServletRequest) {
                         MultipartFile file = multipartHttpServletRequest.getFile(httpParam.name());
-                        if (file != null) {
-                            List<?> list = null;
-                            try {
-                                list = ExcelUtils.importExcel(file, httpParam.arrayClass());
-                            } catch (RuntimeException e) {
-                                logger.error("[导入Excel] 异常", e);
-                                throw new ServiceException(e.getMessage());
-                            }
+                        try {
+                            List<?> list = ExcelUtils.importExcel(file, httpParam.arrayClass());
                             args[i] = list;
+                        } catch (RuntimeException e) {
+                            logger.error("[导入Excel] 异常", e);
+                            throw new ServiceException(e.getMessage());
                         }
                     } else {
                         throw new ServiceException(CoreExceptionDefinition.LAUNCHER_READ_FILE_JUST_SUPPORT_MULTIPART);

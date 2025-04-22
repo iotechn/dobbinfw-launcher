@@ -29,7 +29,7 @@ public class ApiContext {
         if (parameterMap != null) {
             return JacksonUtil.toJSONString(parameterMap);
         } else if (parameterSingleMap != null) {
-            return JacksonUtil.toJSONString(parameterSingleMap);
+            return _gp + "/" + _mt + " " + JacksonUtil.toJSONString(parameterSingleMap);
         }
         return "";
     }
